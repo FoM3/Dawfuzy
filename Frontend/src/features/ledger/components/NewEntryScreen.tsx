@@ -1,0 +1,224 @@
+import { useMemo, useState } from "react";
+import { ArrowRight, Droplet, Minus, Plus, Search, Star, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Eyebrow } from "@/features/marketing/components/Eyebrow";
+import { packTypes } from "@/features/ledger/data/mock-data";
+import { money } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import type { EntryForm, PackType } from "@/features/ledger/types";
+
+const legend = "mb-3 block text-xs2 font-bold tracking-[1.4px] text-subtle uppercase";
+const fieldInput = "h-auto rounded-[3px] border-field-line bg-field p-3.5 text-md2 text-ink";
+
+// Beyond this many tiles the picker scrolls instead of pushing the rest of the form off-screen.
+const SCROLL_AFTER = 8;
+
+export function NewEntryScreen(form: EntryForm) {
+  const { selected, quantityValue } = form;
+  const total = selected.price * quantityValue;
+  const profit = (selected.price - selected.costPrice) * quantityValue;
+  const step = (by: number) => form.setQuantity(String(Math.max(1, quantityValue + by)));
+
+  const [query, setQuery] = useState("");
+  const [packFilter, setPackFilter] = useState<PackType | "All">("All");
+
+  // Only offer the type filter for types actually in the catalogue.
+  const availableTypes = useMemo(
+    () => packTypes.filter(type => form.products.some(p => p.pack === type)),
+    [form.products]
+  );
+
+  const visible = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    return form.products
+      .filter(p => packFilter === "All" || p.pack === packFilter)
+      .filter(p => !term || p.name.toLowerCase().includes(term) || p.description.toLowerCase().includes(term))
+      .sort((a, b) => {
+        const sold = (form.popularity[b.id] ?? 0) - (form.popularity[a.id] ?? 0);
+        return sold !== 0 ? sold : a.name.localeCompare(b.name);
+      });
+  }, [form.products, form.popularity, query, packFilter]);
+
+  const showFinder = form.products.length > 6;
+  const scrolls = visible.length > SCROLL_AFTER;
+
+  return (
+    <div className="mx-auto max-w-[1450px] px-[clamp(22px,4vw,55px)] pt-9 pb-[calc(var(--nav-height)+var(--safe-bottom)+32px)] lg:pb-15">
+      <div className="mb-6 lg:mb-8">
+        <Eyebrow>New entry</Eyebrow>
+        <h2 className="m-0 font-serif text-[clamp(32px,4vw,54px)] leading-none font-medium tracking-[-2px]">
+          What did the shop
+          <br />
+          <em className="font-medium text-accent">sell?</em>
+        </h2>
+      </div>
+
+      <form onSubmit={form.submit} className="grid items-start gap-4 lg:grid-cols-[1fr_360px]">
+        <div className="flex min-w-0 flex-col gap-3.5 border border-line bg-panel p-5 min-[431px]:p-6.5">
+          <fieldset className="m-0 border-0 p-0">
+            <div className="mb-3 flex items-baseline justify-between gap-3">
+              <legend className={cn(legend, "mb-0")}>Which water?</legend>
+              {showFinder && (
+                <span className="text-sm2 text-subtle">
+                  {visible.length} of {form.products.length}
+                </span>
+              )}
+            </div>
+
+            {showFinder && (
+              <div className="mb-3 flex flex-col gap-2.5">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute top-1/2 left-3.5 size-4.5 -translate-y-1/2 text-subtle" aria-hidden="true" />
+                  <Input
+                    aria-label="Search products"
+                    value={query}
+                    onChange={e => setQuery(e.target.value)}
+                    placeholder="Search by name"
+                    className={cn(fieldInput, "pl-11")}
+                  />
+                  {query && (
+                    <button
+                      type="button"
+                      aria-label="Clear search"
+                      onClick={() => setQuery("")}
+                      className="absolute top-1/2 right-3 grid size-7 -translate-y-1/2 place-items-center rounded-full border-0 bg-transparent text-subtle hover:bg-select"
+                    >
+                      <X className="size-4" aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
+
+                {availableTypes.length > 1 && (
+                  <div className="flex flex-wrap gap-2">
+                    {(["All", ...availableTypes] as const).map(type => (
+                      <button
+                        type="button"
+                        key={type}
+                        aria-pressed={packFilter === type}
+                        onClick={() => setPackFilter(type)}
+                        className={cn(
+                          "rounded-full border px-3.5 py-2 text-sm2 transition-colors",
+                          packFilter === type ? "border-brandtext bg-deep text-white" : "border-line bg-field text-ink hover:border-hover-line"
+                        )}
+                      >
+                        {type === "All" ? "All" : `${type}s`}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {visible.length === 0 ? (
+              <p className="m-0 rounded border border-line bg-field px-4 py-8 text-center text-md2 text-subtle">
+                No products match “{query}”.
+              </p>
+            ) : (
+            <div
+              className={cn(
+                "grid grid-cols-2 gap-2 min-[431px]:grid-cols-[repeat(auto-fit,minmax(170px,1fr))] min-[431px]:gap-2.5",
+                scrolls && "max-h-105 overflow-y-auto pr-1"
+              )}
+            >
+              {visible.map((product, index) => {
+                const isPicked = product.id === form.productId;
+                const isTopSeller = showFinder && index === 0 && (form.popularity[product.id] ?? 0) > 0 && !query;
+                return (
+                  <button
+                    type="button"
+                    key={product.id}
+                    aria-pressed={isPicked}
+                    onClick={() => form.selectProduct(product.id)}
+                    className={cn(
+                      "relative grid justify-items-start gap-1 rounded border bg-field p-3 text-left text-ink transition-colors min-[431px]:p-3.5",
+                      isPicked ? "border-brandtext bg-select shadow-[0_0_0_1px_var(--brandtext)_inset]" : "border-line hover:border-hover-line"
+                    )}
+                  >
+                    <span className="mb-1.5 grid size-8 place-items-center rounded-full bg-info-soft text-info">
+                      <Droplet className="size-4.5" aria-hidden="true" />
+                    </span>
+                    <strong className="text-md2 leading-tight">{product.name}</strong>
+                    <small className="text-sm2 text-subtle">
+                      {money(product.price)} · {product.pack}
+                    </small>
+                    {isTopSeller && (
+                      <span className="absolute top-2.5 right-2.5 inline-flex items-center gap-1 rounded-full bg-gold-soft px-2 py-0.5 text-xs2 text-gold-ink">
+                        <Star className="size-3" aria-hidden="true" /> Top
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            )}
+          </fieldset>
+
+          <fieldset className="m-0 border-0 p-0">
+            <legend className={legend}>How many?</legend>
+            <div className="grid grid-cols-[52px_1fr_52px] gap-2">
+              <button
+                type="button"
+                aria-label="Decrease quantity"
+                onClick={() => step(-1)}
+                className="grid place-items-center rounded-[3px] border border-line bg-field text-brandtext transition-colors hover:border-brandtext hover:bg-select"
+              >
+                <Minus className="size-5" aria-hidden="true" />
+              </button>
+              <Input
+                aria-label="Quantity"
+                value={form.quantity}
+                onChange={e => form.setQuantity(e.target.value)}
+                required
+                type="number"
+                min="1"
+                inputMode="numeric"
+                className={cn(fieldInput, "text-center font-serif text-2xl2")}
+              />
+              <button
+                type="button"
+                aria-label="Increase quantity"
+                onClick={() => step(1)}
+                className="grid place-items-center rounded-[3px] border border-line bg-field text-brandtext transition-colors hover:border-brandtext hover:bg-select"
+              >
+                <Plus className="size-5" aria-hidden="true" />
+              </button>
+            </div>
+            <p className="mt-2.5 mb-0 text-sm2 text-subtle">
+              {selected.pack}s of {selected.name} at {money(selected.price)} each
+            </p>
+          </fieldset>
+        </div>
+
+        <aside className="min-w-0 bg-deep p-4.5 text-white min-[431px]:p-6.5 lg:sticky lg:top-26.5">
+          <p className="m-0 mb-1.5 text-xs2 font-bold tracking-[1.4px] text-on-deep-label">SUMMARY</p>
+          <h3 className="m-0 mb-5 font-serif text-2xl2 leading-[1.2] font-medium">{selected.name}</h3>
+
+          <dl className="m-0 border-t border-white/15">
+            <div className="flex justify-between gap-3 border-b border-white/10 py-2.5">
+              <dt className="text-sm2 text-on-deep-subtle">Quantity</dt>
+              <dd className="m-0 text-sm2">{quantityValue || 0}</dd>
+            </div>
+            {form.canSeeProfit && (
+              <div className="flex justify-between gap-3 border-b border-white/10 py-2.5">
+                <dt className="text-sm2 text-on-deep-subtle">Profit</dt>
+                <dd className={cn("m-0 text-sm2", profit < 0 && "text-neg-on-deep")}>{money(profit)}</dd>
+              </div>
+            )}
+          </dl>
+
+          <div className="flex items-end justify-between gap-3 py-5">
+            <span className="text-sm2 text-on-deep-subtle">Total</span>
+            <strong className="font-serif text-3xl2">{money(total)}</strong>
+          </div>
+
+          <Button type="submit" className="h-12 w-full gap-2.5 bg-accent px-5 text-md2 font-semibold text-on-accent hover:bg-accent-hover">
+            Save sale
+            <ArrowRight className="size-4.5" aria-hidden="true" />
+          </Button>
+          <p className="m-0 mt-2.5 text-center text-xs2 text-on-deep-faint">Saved safely on this device, even without internet.</p>
+        </aside>
+      </form>
+    </div>
+  );
+}

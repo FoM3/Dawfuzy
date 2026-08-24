@@ -1,0 +1,271 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Fixed brand identity plus the type scale. Anything that must change between themes
+   lives in the semantic token blocks below, not here. */
+@theme {
+  --color-brand-50: #f6f0e5;
+  --color-brand-100: #e9dcc6;
+  --color-brand-200: #efe7d9;
+  --color-brand-700: #195867;
+  --color-brand-900: #123e4a;
+  --color-brand-950: #102d25;
+  --color-paper: #fbf8f1;
+
+  --font-sans: "DM Sans", Arial, sans-serif;
+  --font-serif: "Newsreader", Georgia, serif;
+
+  --text-xs2: 12px;
+  --text-sm2: 13px;
+  --text-md2: 15px;
+  --text-lg2: 17px;
+  --text-xl2: 20px;
+  --text-2xl2: 24px;
+  --text-3xl2: 30px;
+  --text-display-sm: clamp(24px, 2.6vw, 30px);
+  --text-display-md: clamp(30px, 3.4vw, 39px);
+  --text-display-lg: clamp(42px, 4.5vw, 66px);
+  --text-display-xl: clamp(46px, 6.2vw, 92px);
+}
+
+/* Light theme. .theme-light re-declares it so the marketing page can opt out of dark. */
+:root,
+.theme-light {
+  --app: #f4f1ea;
+  --panel: #fffdfa;
+  --band: #f3f0e9;
+  --header-bg: rgba(250, 248, 243, 0.85);
+  --field: #ffffff;
+  --field-line: #d8d9d3;
+  --line: rgba(23, 61, 50, 0.14);
+  --line-soft: #e9e6df;
+  --hover-line: #9fb3ab;
+  --select: #f2f7f4;
+
+  --ink: #17221e;
+  --subtle: #5d6863;
+  --faint: #7b847f;
+  --brandtext: #123e4a;
+
+  --deep: #123e4a;
+  --deep-2: #195867;
+  --on-deep: #ffffff;
+  --on-deep-soft: #cfdcd7;
+  --on-deep-subtle: #a9c0b8;
+  --on-deep-label: #9db6ad;
+  --on-deep-faint: #93aaa2;
+  --neg-on-deep: #f0a184;
+
+  --accent: #db7550;
+  --accent-hover: #c8613d;
+  /* Dark ink on terracotta: white only reaches 3.1:1, below AA for button text. */
+  --on-accent: #2b1006;
+  --insight: #e9dcc6;
+  --avatar: #e0ccb0;
+
+  --pos: #35684a;
+  --pos-soft: #e9f3ec;
+  --pos-line: #cbdbd0;
+  --neg: #b04f2c;
+  --neg-soft: #f8e6dd;
+  --info: #3f7788;
+  --info-soft: #e3f0f3;
+  --warn-soft: #fff7ef;
+  --warn-line: #e6cbb8;
+  --gold-soft: #f6efe2;
+  --gold-ink: #8a6d2f;
+  --chart-bar: #c6ad87;
+
+  --radius: 0.25rem;
+  --background: var(--app);
+  --foreground: var(--ink);
+  --card: var(--panel);
+  --card-foreground: var(--ink);
+  --popover: var(--panel);
+  --popover-foreground: var(--ink);
+  --primary: #123e4a;
+  --primary-foreground: #ffffff;
+  --secondary: #e9dcc6;
+  --secondary-foreground: #123e4a;
+  --muted: var(--band);
+  --muted-foreground: var(--subtle);
+  --accent-foreground: #123e4a;
+  --destructive: var(--neg);
+  --border: var(--line);
+  --input: var(--field-line);
+  --ring: #123e4a;
+}
+
+/* Dark theme: near-neutral surfaces stacked by elevation (page < panel < band), thin
+   low-contrast borders, and colour reserved for accents. The deep panels stop being
+   filled brand slabs here; in dark they are simply the next elevation up. */
+.dark {
+  --app: #0e1011;
+  --panel: #16191a;
+  --band: #1b1f20;
+  --header-bg: rgba(14, 16, 17, 0.85);
+  --field: #131617;
+  --field-line: rgba(255, 255, 255, 0.14);
+  --line: rgba(255, 255, 255, 0.10);
+  --line-soft: rgba(255, 255, 255, 0.06);
+  --hover-line: rgba(255, 255, 255, 0.22);
+  --select: rgba(94, 201, 183, 0.12);
+
+  --ink: #e6e8e7;
+  --subtle: #9aa0a0;
+  --faint: #767c7c;
+  --brandtext: #5ec9b7;
+
+  --deep: #14181a;
+  --deep-2: #17282c;
+  --on-deep: #e6e8e7;
+  --on-deep-soft: #c3c9c8;
+  --on-deep-subtle: #9aa0a0;
+  --on-deep-label: #8b9391;
+  --on-deep-faint: #767c7c;
+  --neg-on-deep: #ef9070;
+
+  --accent: #e08662;
+  --accent-hover: #ef9b78;
+  --on-accent: #2b1006;
+  --insight: #17201f;
+  --avatar: #2a2f30;
+
+  --pos: #6ec898;
+  --pos-soft: rgba(110, 200, 152, 0.14);
+  --pos-line: rgba(110, 200, 152, 0.28);
+  --neg: #ef9070;
+  --neg-soft: rgba(239, 144, 112, 0.14);
+  --info: #7cc0d8;
+  --info-soft: rgba(124, 192, 216, 0.14);
+  --warn-soft: rgba(224, 134, 98, 0.12);
+  --warn-line: rgba(224, 134, 98, 0.30);
+  --gold-soft: rgba(224, 189, 122, 0.14);
+  --gold-ink: #e0bd7a;
+  --chart-bar: rgba(255, 255, 255, 0.16);
+
+  /* Light accent on dark, dark text on the accent: the usual dark-mode button treatment. */
+  --primary: #5ec9b7;
+  --primary-foreground: #06201c;
+  --secondary: #1b1f20;
+  --secondary-foreground: var(--ink);
+  --accent-foreground: var(--ink);
+  --ring: #5ec9b7;
+}
+
+/* Expose the semantic tokens as utilities (bg-panel, text-subtle, border-line, …). */
+@theme inline {
+  --color-app: var(--app);
+  --color-panel: var(--panel);
+  --color-band: var(--band);
+  --color-header-bg: var(--header-bg);
+  --color-field: var(--field);
+  --color-field-line: var(--field-line);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-hover-line: var(--hover-line);
+  --color-select: var(--select);
+  --color-ink: var(--ink);
+  --color-subtle: var(--subtle);
+  --color-faint: var(--faint);
+  --color-brandtext: var(--brandtext);
+  --color-deep: var(--deep);
+  --color-deep-2: var(--deep-2);
+  --color-on-deep: var(--on-deep);
+  --color-on-deep-soft: var(--on-deep-soft);
+  --color-on-deep-subtle: var(--on-deep-subtle);
+  --color-on-deep-label: var(--on-deep-label);
+  --color-on-deep-faint: var(--on-deep-faint);
+  --color-neg-on-deep: var(--neg-on-deep);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-on-accent: var(--on-accent);
+  --color-insight: var(--insight);
+  --color-avatar: var(--avatar);
+  --color-pos: var(--pos);
+  --color-pos-soft: var(--pos-soft);
+  --color-pos-line: var(--pos-line);
+  --color-neg: var(--neg);
+  --color-neg-soft: var(--neg-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-warn-soft: var(--warn-soft);
+  --color-warn-line: var(--warn-line);
+  --color-gold-soft: var(--gold-soft);
+  --color-gold-ink: var(--gold-ink);
+  --color-chart-bar: var(--chart-bar);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --nav-height: 68px;
+  --stat-min: 200px;
+  --kb-inset: 0px;
+}
+
+@media (max-width: 430px) {
+  :root { --stat-min: 145px; }
+}
+
+@layer base {
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
+    background: var(--app);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-md2);
+  }
+  #root { min-height: 100dvh; }
+  button, input, select, textarea { font: inherit; }
+  button, a { -webkit-tap-highlight-color: transparent; }
+  button { cursor: pointer; }
+  a { color: inherit; text-decoration: none; }
+  svg { flex-shrink: 0; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* Native controls (date pickers, number spinners, scrollbars) follow the theme. */
+  html.dark { color-scheme: dark; }
+  html:not(.dark) { color-scheme: light; }
+}
+
+/* While the keyboard is up, drop the fixed tab bar out of the way. */
+html[data-keyboard="open"] [data-app-nav] {
+  transform: translateY(100%);
+  pointer-events: none;
+}
+[data-app-nav] { transition: transform .2s ease; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *:before, *:after { transition-duration: .01ms !important; }
+}
