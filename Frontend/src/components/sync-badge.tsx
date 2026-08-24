@@ -10,10 +10,8 @@ const copy: Record<SyncState, { label: string; Icon: typeof Wifi; tone: string }
   error: { label: "Sync failed", Icon: TriangleAlert, tone: "text-neg" }
 };
 
-/**
- * The same state as an icon, shaped like the theme toggle so the header reads as one row
- * of controls. The colour still carries the meaning; the label moves to the tooltip.
- */
+// The same state as an icon, shaped like the theme toggle so the header reads as one row of
+// controls. The colour still carries the meaning; the label moves to the tooltip.
 export function SyncIcon({ sync, className }: { sync: SyncState; className?: string }) {
   const { label, Icon, tone } = copy[sync];
   return (

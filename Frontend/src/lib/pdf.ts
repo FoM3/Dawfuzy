@@ -9,8 +9,8 @@ export type SalesReport = {
   to: string;
   isAdmin: boolean;
   by: string;
-  /** Any person or product the report was narrowed to, printed so it cannot be mistaken
-   *  for the whole shop. */
+  // Any person or product this was narrowed to, printed so a filtered report cannot be
+  // mistaken for the whole shop.
   scope?: string[];
 };
 
@@ -34,10 +34,8 @@ const fileSafe = (from: string, to: string) =>
 
 type Doc = import("jspdf").jsPDF;
 
-/**
- * The brand mark, drawn rather than embedded. A circle and a letter carry the identity
- * without shipping an image, and it cannot fail to load the way a fetched asset can.
- */
+// The brand mark, drawn rather than embedded. A circle and a letter carry the identity without
+// shipping an image, and it cannot fail to load the way a fetched asset can.
 function drawLogo(doc: Doc, x: number, y: number, size = 26) {
   const r = size / 2;
   doc.setFillColor(ink);
@@ -49,7 +47,7 @@ function drawLogo(doc: Doc, x: number, y: number, size = 26) {
   doc.setFont("helvetica", "normal");
 }
 
-/** Shared page furniture, so both reports open the same way. */
+// Shared page furniture, so both reports open the same way.
 function header(
   doc: Doc, width: number, margin: number, kicker: string,
   from: string, to: string, by: string, scope: string[] = []
@@ -77,7 +75,7 @@ function header(
   doc.line(margin, 94, width - margin, 94);
 }
 
-/** Summary figures across the top, evenly spaced. */
+// Summary figures across the top, evenly spaced.
 function summaryRow(doc: Doc, width: number, margin: number, y: number, cells: [string, string][]) {
   const column = (width - margin * 2) / cells.length;
   let x = margin;
@@ -95,11 +93,9 @@ function summaryRow(doc: Doc, width: number, margin: number, y: number, cells: [
   doc.setFont("helvetica", "normal");
 }
 
-/**
- * A revenue-per-day bar chart drawn with plain rectangles. A charting library would be
- * another dependency and a rasterised image; this stays vector and weighs nothing.
- * Buckets are capped so a long range stays readable rather than becoming a comb.
- */
+// A revenue-per-day bar chart drawn with plain rectangles. A charting library would be another
+// dependency and a rasterised image; this stays vector and weighs nothing. Buckets are capped so
+// a long range stays readable rather than becoming a comb.
 function drawChart(
   doc: Doc,
   days: { date: string; revenue: number }[],
@@ -166,7 +162,7 @@ function drawChart(
   return plotTop + plotHeight + 22;
 }
 
-/** Revenue per calendar day across the range, gaps included so quiet days show. */
+// Revenue per calendar day across the range, gaps included so quiet days show.
 function perDaySeries(rows: Transaction[], from: string, to: string) {
   const totals = new Map<string, number>();
   for (const row of rows) totals.set(row.date, (totals.get(row.date) ?? 0) + row.amount);
@@ -178,12 +174,9 @@ function perDaySeries(rows: Transaction[], from: string, to: string) {
   return days;
 }
 
-/**
- * Builds the sales report and hands it to the browser to save.
- *
- * jsPDF is ~350KB, which is most of the app again, so it is imported here rather than at
- * the top of the module: the download only costs anything for someone who exports.
- */
+// Builds the sales report and hands it to the browser to save. jsPDF is ~350KB, which is most of
+// the app again, so it is imported here rather than at the top of the module: the download only
+// costs anything for someone who exports.
 export async function downloadSalesReport(report: SalesReport) {
   const [{ jsPDF }, autoTableModule] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
   const autoTable = autoTableModule.default;
@@ -261,7 +254,7 @@ export type ProductLine = {
   units: number;
   revenue: number;
   profit: number;
-  /** The lowest and highest actually charged in the period, not the catalogue's price. */
+  // The lowest and highest actually charged in the period, not the catalogue's price.
   sellLow: number;
   sellHigh: number;
   costLow: number;
@@ -281,7 +274,7 @@ export type AnalyticsReport = {
   scope?: string[];
 };
 
-/** The summary rather than the rows: what sold, who sold it, and what it made. */
+// The summary rather than the rows: what sold, who sold it, and what it made.
 export async function downloadAnalyticsReport(report: AnalyticsReport) {
   const [{ jsPDF }, autoTableModule] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
   const autoTable = autoTableModule.default;

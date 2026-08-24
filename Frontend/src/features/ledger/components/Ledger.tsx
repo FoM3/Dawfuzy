@@ -17,7 +17,7 @@ import { clockTime, money, today, toNumber } from "@/lib/format";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { probeConnection } from "@/lib/connection";
 import { changeMyName, changeMyPin, createPerson, currentAccount, resetPinFor, setPersonActive, signInWithPin, signOutRemote, updatePersonDetails } from "@/features/ledger/data/auth";
-import { enqueue, flushOutbox, pullPeople, pullProducts, pushAudit, pushProduct, readOutbox, writeOutbox, type SyncState } from "@/lib/sync";
+import { addPending, countPending, flushOutbox, pullPeople, pullProducts, pushAudit, pushProduct, readPending, type SyncState } from "@/lib/sync";
 import { deleteSale, updateSale, useSalesByProduct } from "@/features/ledger/data/queries";
 import { formatDay } from "@/lib/ledger";
 import { useKeyboardInset } from "@/lib/use-keyboard-inset";
@@ -36,7 +36,9 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
   // Nothing here is cached on the device. The seeds are only a starting shape for the
   // first paint and for running without Supabase; the server overwrites them on refresh.
   const [products, setProducts] = useState<Product[]>(seedProducts);
-  const [transactions, setTransactions] = useState<Transaction[]>(seedTransactions);
+  // Anything recorded here but not yet acknowledged by the server comes back on boot, so
+  // a sale rung up during an outage is still on screen and still waiting to be sent.
+  const [transactions, setTransactions] = useState<Transaction[]>(() => [...seedTransactions, ...readPending()]);
   const [accounts, setAccounts] = useState<Account[]>(seedAccounts);
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -53,7 +55,7 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
     let cancelled = false;
     void probeConnection().then(result => {
       if (cancelled) return;
-      if (result.state === "connected") setSync(readOutbox().length ? "pending" : "synced");
+      if (result.state === "connected") setSync(countPending() ? "pending" : "synced");
       else if (result.state === "local") setSync("local");
       else if (result.state === "unreachable") setSync(navigator.onLine ? "error" : "offline");
       else setSync("error"); // reachable, but the schema is not there yet
@@ -153,10 +155,14 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
     if (!supabase) return;
     if (!navigator.onLine) { setSync("offline"); return; }
     try {
-      const { sent } = await flushOutbox(supabase, transactions, sessionId);
-      // Rows reached the server, so every rollup and page built from them is now stale.
-      if (sent) void queryClient.invalidateQueries({ queryKey: ["sales"] });
-      setSync(readOutbox().length ? "pending" : "synced");
+      const { sent, sentIds, waiting } = await flushOutbox(supabase);
+      if (sent) {
+        // Rows reached the server, so every rollup and page built from them is stale, and
+        // the local copies can go: history reads them back from the server now.
+        void queryClient.invalidateQueries({ queryKey: ["sales"] });
+        setTransactions(current => current.filter(t => !sentIds.includes(t.id)));
+      }
+      setSync(waiting > 0 ? "pending" : "synced");
     } catch {
       setSync("error");
     }
@@ -178,26 +184,27 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
     setScreen("entry");
   }
 
-  /**
-   * Nothing one person saw should outlive their session. The till is shared, so the next
-   * person to sign in must not inherit cached sales, cost prices, profit, the audit trail
-   * or anybody's PIN, whether or not their role would let them see it.
-   */
+  // Nothing one person saw should outlive their session. The till is shared, so the next person to
+  // sign in must not inherit cached sales, cost prices, profit, the audit trail or anybody's PIN,
+  // whether or not their role would let them see it.
   async function signOut() {
-    // Drain first: queued sales are stamped with the live session, so anything still
-    // waiting would otherwise be dropped or credited to whoever signs in next.
+    // Drain first, while this person's session can still stamp their own rows.
     await flush();
-    const stranded = readOutbox().length;
+    const stranded = countPending();
     if (stranded > 0) {
-      toast.error(`${stranded} ${stranded === 1 ? "sale is" : "sales are"} still unsent and will be lost`);
+      toast.warning(
+        `${stranded} ${stranded === 1 ? "sale is" : "sales are"} still unsent. They stay on this device until ${account?.name ?? "you"} sign${stranded === 1 ? "s" : "s"} back in.`
+      );
     }
 
     setSessionId(null);
     setScreen("entry");
     queryClient.clear();
-    setTransactions([]);
+    // Unsent sales are kept: they are takings nobody has recorded anywhere else. They are
+    // held against the person who rang them up, so the next person to sign in cannot send
+    // them under their own name.
+    setTransactions(readPending());
     setAudit([]);
-    writeOutbox([]);
     // Names stay for the sign-in list; PINs must not.
     setAccounts(current => current.map(a => ({ ...a, pin: undefined })));
     void signOutRemote();
@@ -268,10 +275,8 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
     return true;
   }
 
-  /**
-   * Corrects or removes a recorded sale. Sales are append-only apart from this, so every
-   * correction is written to the audit trail: the figure can change, but not quietly.
-   */
+  // Corrects or removes a recorded sale. Sales are append-only apart from this, so every
+  // correction is written to the audit trail: the figure can change, but not quietly.
   async function correctSale(sale: Transaction, next: { quantity: number; productId: string } | null) {
     const message = next ? await updateSale(sale.id, next.quantity, next.productId) : await deleteSale(sale.id);
     if (message) return message;
@@ -294,7 +299,7 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
     return null;
   }
 
-  /** An admin editing someone's name or role. The server decides who is allowed to. */
+  // An admin editing someone's name or role. The server decides who is allowed to.
   async function updatePerson(id: string, name: string, role: Role): Promise<string | null> {
     const target = accounts.find(a => a.id === id);
     if (!target) return "No such person";
@@ -323,7 +328,7 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
     return null;
   }
 
-  /** Disabling keeps the row, so past sales and the audit trail stay attributed. */
+  // Disabling keeps the row, so past sales and the audit trail stay attributed.
   async function toggleAccountActive(id: string, active: boolean) {
     const target = accounts.find(a => a.id === id);
     if (!target || id === sessionId) return;
@@ -365,15 +370,14 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
       recordedById: sessionId ?? undefined,
       recordedBy: account?.name
     };
-    const nextTransactions = [...transactions, entry];
-    setTransactions(nextTransactions);
+    setTransactions([...transactions, entry]);
     setQuantity("1");
     if (supabase) {
-      enqueue(entry.id);
+      // Written to the device before anything is attempted over the network, so the sale
+      // survives a dropped connection, a reload, or the tab being closed.
+      addPending(entry);
       setSync("pending");
-      void flushOutbox(supabase, nextTransactions, sessionId)
-        .then(() => setSync(readOutbox().length ? "pending" : "synced"))
-        .catch(() => setSync(navigator.onLine ? "error" : "offline"));
+      void flush();
     }
     toast.success("Sale saved and totals updated");
   }

@@ -5,11 +5,9 @@ const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const key = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ??
   import.meta.env.VITE_SUPABASE_ANON_KEY) as string | undefined;
 
-/**
- * PostgREST is a plain REST API, so the reads go through axios while supabase-js keeps
- * ownership of the session. That split buys one place to attach the token, one timeout,
- * and one error shape, without reimplementing token refresh.
- */
+// PostgREST is a plain REST API, so the reads go through axios while supabase-js keeps ownership
+// of the session. That split buys one place to attach the token, one timeout, and one error
+// shape, without reimplementing token refresh.
 export const api: AxiosInstance | null =
   url && key
     ? axios.create({
@@ -29,7 +27,7 @@ api?.interceptors.request.use(async config => {
   return config;
 });
 
-/** PostgREST puts its messages in the body; surface that rather than "Request failed". */
+// PostgREST puts its messages in the body; surface that rather than "Request failed".
 export function explainApiError(error: unknown): string {
   if (axios.isAxiosError(error)) {
     if (error.code === "ECONNABORTED") return "The connection timed out. Try again.";
@@ -46,12 +44,9 @@ export function explainApiError(error: unknown): string {
 
 export type Page<T> = { rows: T[]; total: number };
 
-/**
- * One page of a table or view, with the total row count.
- *
- * count=exact makes PostgREST return "0-19/482" in Content-Range, which is what lets the
- * pager show a last page without a second query.
- */
+// One page of a table or view, with the total row count. count=exact makes PostgREST return
+// "0-19/482" in Content-Range, which is what lets the pager show a last page without a second
+// query.
 export async function fetchPage<T>(
   path: string,
   params: Record<string, string>,
@@ -69,7 +64,7 @@ export async function fetchPage<T>(
   return { rows: response.data ?? [], total: Number.isFinite(total) ? total : response.data.length };
 }
 
-/** Calls a Postgres function. The aggregates all live behind these. */
+// Calls a Postgres function. The aggregates all live behind these.
 export async function callRpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
   if (!api) return [] as unknown as T;
   const { data } = await api.post<T>(`/rpc/${name}`, args);

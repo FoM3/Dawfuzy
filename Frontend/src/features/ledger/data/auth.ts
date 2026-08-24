@@ -1,11 +1,9 @@
 import { emailForName, passwordForPin, provisioningClient, supabase } from "@/lib/supabase";
 import type { Account, Role } from "@/features/ledger/types";
 
-/**
- * Supabase speaks in terms of email auth, which is an implementation detail here: the
- * addresses are synthetic and no mail is ever meant to be sent. Translate the errors
- * people actually hit into the setting that causes them.
- */
+// Supabase speaks in terms of email auth, which is an implementation detail here: the addresses
+// are synthetic and no mail is ever meant to be sent. Translate the errors people actually hit
+// into the setting that causes them.
 export function explainAuthError(error: { code?: string; message?: string } | null): string {
   const code = error?.code ?? "";
   const message = error?.message ?? "";
@@ -43,13 +41,9 @@ export function explainAuthError(error: { code?: string; message?: string } | nu
   return message || "Could not complete that";
 }
 
-/**
- * Signs in an existing person by name + PIN.
- *
- * The address comes from the people view when it is known. Deriving it from the current
- * name only works until somebody is renamed, at which point the derived address stops
- * matching the one the account was created with.
- */
+// Signs in an existing person by name + PIN. The address comes from the people view when it is
+// known. Deriving it from the current name only works until somebody is renamed, at which point
+// the derived address stops matching the one the account was created with.
 export async function signInWithPin(name: string, pin: string, email?: string): Promise<{ error?: string; account?: Account }> {
   if (!supabase) return { error: "Supabase is not configured" };
 
@@ -94,11 +88,9 @@ export async function signOutRemote() {
   await supabase?.auth.signOut();
 }
 
-/**
- * Creates a person without disturbing the admin's session, by running the sign-up on a
- * second client. The trigger always makes them a 'user'; promotion is a separate
- * update that only an admin's own session is allowed to perform.
- */
+// Creates a person without disturbing the admin's session, by running the sign-up on a second
+// client. The trigger always makes them a 'user'; promotion is a separate update that only an
+// admin's own session is allowed to perform.
 export async function createPerson(name: string, pin: string, role: Role): Promise<{ error?: string; id?: string }> {
   if (!supabase) return { error: "Supabase is not configured" };
   const provisioner = provisioningClient();
@@ -111,10 +103,9 @@ export async function createPerson(name: string, pin: string, role: Role): Promi
   });
   if (error || !data.user) return { error: explainAuthError(error) };
 
-  // The trigger always creates the profile as 'user', so the PIN and any promotion are
-  // applied here from the caller's own session. .select() matters: an update that RLS
-  // filters to zero rows reports no error, so without it a blocked promotion looks
-  // like a success and the person silently stays a plain user.
+  // The trigger always creates the profile as 'user', so the PIN and any promotion are applied
+  // here from the caller's own session. .select() matters: an update RLS filters to zero rows
+  // reports no error, so without it a blocked promotion looks like a success.
   const patch: Record<string, string> = { pin };
   if (role !== "user") patch.role = role;
 
@@ -137,28 +128,50 @@ export async function createPerson(name: string, pin: string, role: Role): Promi
   return { id: data.user.id };
 }
 
-/** Changes your own display name. The sign-in address is unaffected. */
+// Changes your own display name. The sign-in address is unaffected.
 export async function changeMyName(name: string): Promise<string | null> {
   if (!supabase) return null;
   const { error } = await supabase.rpc("set_my_name", { new_name: name });
   return error ? explainAuthError(error) : null;
 }
 
-/** An admin editing someone else's name and role. The server enforces who may do what. */
+// An admin editing someone else's name and role. The server enforces who may do what.
 export async function updatePersonDetails(id: string, name: string, role: Role): Promise<string | null> {
   if (!supabase) return null;
   const { error } = await supabase.rpc("set_person_details", { target: id, new_name: name, new_role: role });
   return error ? explainAuthError(error) : null;
 }
 
-/** Disables or re-enables a person. The profile row is kept either way. */
+// Disables or re-enables a person. The profile row is kept either way.
 export async function setPersonActive(id: string, active: boolean): Promise<string | null> {
   if (!supabase) return null;
   const { error } = await supabase.rpc("set_person_active", { target: id, active });
   return error ? explainAuthError(error) : null;
 }
 
-/** Restores the signed-in person after a reload. */
+// A session is good for a month from the PIN being entered, however often it refreshes.
+export const SESSION_MAX_DAYS = 30;
+
+// When this session was really authenticated. Not the token's iat, which moves every hour
+// on refresh and would push the deadline back forever; amr records when the PIN was
+// actually entered and is carried across refreshes, so it is the only field that ages.
+function authenticatedAt(accessToken: string): number | null {
+  try {
+    const [, encoded] = accessToken.split(".");
+    const payload = JSON.parse(atob(encoded.replace(/-/g, "+").replace(/_/g, "/")));
+    const stamp = Array.isArray(payload.amr) ? payload.amr[0]?.timestamp : undefined;
+    return typeof stamp === "number" ? stamp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+export const sessionExpired = (accessToken: string) => {
+  const since = authenticatedAt(accessToken);
+  return since !== null && Date.now() - since > SESSION_MAX_DAYS * 86_400_000;
+};
+
+// Restores the signed-in person after a reload.
 export async function currentAccount(): Promise<Account | null> {
   if (!supabase) return null;
 
@@ -168,6 +181,13 @@ export async function currentAccount(): Promise<Account | null> {
   const { data: { session } } = await supabase.auth.getSession();
   const user = session?.user;
   if (!user) return null;
+
+  // The refresh token never expires on its own, so without this a till signed in once
+  // would stay signed in forever.
+  if (sessionExpired(session.access_token)) {
+    await supabase.auth.signOut();
+    return null;
+  }
 
   const { data: profile, error } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
   if (profile) {
@@ -198,7 +218,7 @@ export async function currentAccount(): Promise<Account | null> {
   return null;
 }
 
-/** Changes your own PIN. Both the auth password and the stored PIN must move together. */
+// Changes your own PIN. Both the auth password and the stored PIN must move together.
 export async function changeMyPin(pin: string): Promise<string | null> {
   if (!supabase) return "Supabase is not configured";
   if (!/^\d{4}$/.test(pin)) return "PIN must be exactly four digits";
@@ -211,10 +231,8 @@ export async function changeMyPin(pin: string): Promise<string | null> {
   return null;
 }
 
-/**
- * Resets somebody else's PIN. Only the owner may do this. set_pin_for moves the stored
- * pin and the auth password together, so there is no Edge Function to deploy.
- */
+// Resets somebody else's PIN. Only the owner may do this. set_pin_for moves the stored pin and the
+// auth password together, so there is no Edge Function to deploy.
 export async function resetPinFor(targetId: string, pin: string): Promise<string | null> {
   if (!supabase) return "Supabase is not configured";
   if (!/^\d{4}$/.test(pin)) return "PIN must be exactly four digits";

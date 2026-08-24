@@ -40,7 +40,7 @@ const toTransaction = (r: RemoteSale): Transaction => ({
   recordedBy: r.recorded_by_name || undefined
 });
 
-/** One page of sales for a date range, newest first. */
+// One page of sales for a date range, newest first.
 export function useSalesPage(from: string, to: string, page: number, isAdmin: boolean) {
   return useQuery({
     queryKey: ["sales", "page", { from, to, page, isAdmin }],
@@ -59,11 +59,9 @@ export function useSalesPage(from: string, to: string, page: number, isAdmin: bo
   });
 }
 
-/**
- * Every sale in a range, for the PDF export. The screen only ever holds one page, and a
- * report of page 1 would be a quietly wrong document, so this walks the whole range.
- * Chunked because PostgREST caps a single response.
- */
+// Every sale in a range, for the PDF export. The screen only ever holds one page, and a report of
+// page 1 would be a quietly wrong document, so this walks the whole range. Chunked because
+// PostgREST caps a single response.
 export async function fetchAllSales(
   from: string,
   to: string,
@@ -90,7 +88,7 @@ export async function fetchAllSales(
 
 type Totals = { revenue: number; profit: number; units: number; sale_count: number };
 
-/** Totals across the whole range, not the loaded page. */
+// Totals across the whole range, not the loaded page.
 export function useSalesTotals(from: string, to: string) {
   return useQuery({
     queryKey: ["sales", "totals", { from, to }],
@@ -153,7 +151,7 @@ export function useSalesByPerson(from: string, to: string) {
   });
 }
 
-/** First and last sale ever recorded, so an all-time daily average divides by real days. */
+// First and last sale ever recorded, so an all-time daily average divides by real days.
 export function useSalesSpan() {
   return useQuery({
     queryKey: ["sales", "span"],
@@ -170,10 +168,8 @@ type RemoteAudit = {
   subject: string; detail: string | null; happened_on: string; happened_at_label: string;
 };
 
-/**
- * Corrects a recorded sale. The server decides who may touch which row, so the UI only
- * has to offer the button; it cannot grant itself permission by hiding the rule.
- */
+// Corrects a recorded sale. The server decides who may touch which row, so the UI only has to
+// offer the button; it cannot grant itself permission by hiding the rule.
 export async function updateSale(id: string, quantity: number, productId: string): Promise<string | null> {
   try {
     await callRpc("update_sale", { sale_id: id, new_quantity: quantity, new_product_id: productId });
@@ -192,7 +188,7 @@ export async function deleteSale(id: string): Promise<string | null> {
   }
 }
 
-/** One page of the audit trail, newest first. */
+// One page of the audit trail, newest first.
 export function useAuditPage(page: number, enabled: boolean) {
   return useQuery({
     queryKey: ["audit", "page", { page }],

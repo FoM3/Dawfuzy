@@ -12,7 +12,7 @@ if (publishableKey?.startsWith("sb_secret_")) {
   throw new Error("A Supabase secret key must never be used in the browser. Use the publishable key.");
 }
 
-/** With no credentials the app runs exactly as before: local-only, fully offline. */
+// With no credentials the app runs exactly as before: local-only, fully offline.
 export const isSupabaseConfigured = Boolean(url && publishableKey);
 
 export const supabase: SupabaseClient | null = isSupabaseConfigured

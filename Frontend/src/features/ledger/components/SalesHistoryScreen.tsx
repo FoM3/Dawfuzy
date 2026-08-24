@@ -14,7 +14,8 @@ import { Eyebrow } from "@/features/marketing/components/Eyebrow";
 import { money, today, toNumber } from "@/lib/format";
 import { formatDay, isSale, saleProfit, shiftDays, startOfMonth, totalOf, withinRange } from "@/lib/ledger";
 import { Pagination } from "@/components/pagination";
-import { PAGE_SIZE, fetchAllSales, useSalesPage, useSalesTotals } from "@/features/ledger/data/queries";
+import { PAGE_SIZE, useSalesPage, useSalesTotals } from "@/features/ledger/data/queries";
+import { readPending } from "@/lib/sync";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import { ExportSheet } from "@/features/ledger/components/ExportSheet";
@@ -124,10 +125,24 @@ export function SalesHistoryScreen({ transactions, products, people, isAdmin, cu
     [transactions, from, to]
   );
 
-  const rows = isSupabaseConfigured
+  // Sales that have not reached the server are not in any page it returns, so they are
+  // shown on the first page. Without this an offline sale is saved and invisible, which
+  // reads as lost.
+  const unsent = useMemo(
+    () =>
+      isSupabaseConfigured
+        ? readPending()
+            .filter(t => withinRange(t.date, from, to))
+            .sort((a, b) => b.id.localeCompare(a.id))
+        : [],
+    [from, to, transactions]
+  );
+
+  const served = isSupabaseConfigured
     ? salesPage.data?.rows ?? []
     : localRows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-  const count = isSupabaseConfigured ? salesPage.data?.total ?? 0 : localRows.length;
+  const rows = page === 0 ? [...unsent, ...served] : served;
+  const count = (isSupabaseConfigured ? salesPage.data?.total ?? 0 : localRows.length) + unsent.length;
 
   // Totals come from a server-side rollup over the whole range. Summing the rows on
   // screen would describe one page of 20 and quietly under-report the day's takings.
@@ -277,7 +292,14 @@ export function SalesHistoryScreen({ transactions, products, people, isAdmin, cu
                         {formatDay(row.date)}
                         <span className="block text-sm2 text-faint">{row.time}</span>
                       </td>
-                      <td className={cn(td, "font-semibold")}>{row.item}</td>
+                      <td className={cn(td, "font-semibold")}>
+                        {row.item}
+                        {unsent.some(u => u.id === row.id) && (
+                          <span className="ml-2 rounded-full bg-warn-soft px-2 py-0.5 text-xs2 whitespace-nowrap text-accent">
+                            Not sent yet
+                          </span>
+                        )}
+                      </td>
                       <td className={cn(td, "whitespace-nowrap text-subtle")}>{row.recordedBy || "—"}</td>
                       <td className={cn(td, "text-right whitespace-nowrap")}>{row.quantity}</td>
                       <td className={cn(td, "text-right whitespace-nowrap text-subtle")}>{money(row.unitPrice)}</td>

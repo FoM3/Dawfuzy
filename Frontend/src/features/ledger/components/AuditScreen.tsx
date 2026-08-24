@@ -24,7 +24,7 @@ const look: Record<AuditAction, { label: string; Icon: typeof Package; tone: str
   "sale.deleted": { label: "Removed sale", Icon: Trash2, tone: "bg-neg-soft text-neg" }
 };
 
-/** embedded drops the page heading so the account page can host it as one more card. */
+// embedded drops the page heading so the account page can host it as one more card.
 export function AuditScreen({ audit, embedded = false }: { audit: AuditEntry[]; embedded?: boolean }) {
   const [page, setPage] = useState(0);
   const query = useAuditPage(page, isSupabaseConfigured);

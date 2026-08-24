@@ -35,13 +35,13 @@ export const seedProducts: Product[] = [
 const priceOf = (id: string) => seedProducts.find(p => p.id === id)!;
 
 
-/** No demo sales: the ledger starts empty so every figure on screen is real. */
+// No demo sales: the ledger starts empty so every figure on screen is real.
 export const seedTransactions: Transaction[] = [];
 
 export const packTypes = ["Pack", "Bag", "Dispenser"] as const;
 
 // One admin exists so there is always a way in; everyone else is added from the Team screen.
-/** The shop owner signs in with this. Kept fixed so the till is never locked out. */
+// The shop owner signs in with this. Kept fixed so the till is never locked out.
 export const OWNER_PIN = "1575";
 
 export const seedAccounts: Account[] = [

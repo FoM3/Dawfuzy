@@ -69,7 +69,7 @@ type Props = {
   accountName: string;
   products: Product[];
   people: Account[];
-  /** Only used when there is no backend to query. */
+  // Only used when there is no backend to query.
   localTransactions: Transaction[];
 };
 
@@ -125,10 +125,9 @@ export function ExportSheet({ open, setOpen, kind, isAdmin, accountName, product
       if (kind === "sales") {
         await pdf.downloadSalesReport({ rows, totals, from, to, isAdmin, by: accountName, scope });
       } else {
-        // Prices are taken from the sales themselves, never from the catalogue: a sale
-        // carries what it was actually charged at, so a later price change cannot rewrite
-        // an old report. Where a product moved price inside the period, both ends are
-        // kept so the document can show a range rather than pick one and mislead.
+        // Prices come from the sales, never the catalogue: each carries what it was actually
+        // charged at, so a later price change cannot rewrite an old report. Both ends are kept
+        // so a product that moved price mid-period shows a range rather than one misleading figure.
         const byProduct = new Map<string, ProductLine>();
         for (const r of rows) {
           const row = byProduct.get(r.item) ?? {

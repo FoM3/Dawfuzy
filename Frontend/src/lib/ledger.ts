@@ -1,6 +1,6 @@
 import type { Transaction } from "@/features/ledger/types";
 
-/** Profit uses the prices captured on the sale, never the product's current prices. */
+// Profit uses the prices captured on the sale, never the product's current prices.
 export const saleProfit = (t: Transaction) => (t.unitPrice - t.costPrice) * t.quantity;
 
 export const totalOf = (transactions: Transaction[], pick: (t: Transaction) => number) =>
@@ -17,7 +17,7 @@ export function shiftDays(iso: string, days: number) {
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
 }
 
-/** Whole days from a to b, both plain YYYY-MM-DD. Negative when b is earlier. */
+// Whole days from a to b, both plain YYYY-MM-DD. Negative when b is earlier.
 export function daysBetween(a: string, b: string) {
   const [ya, ma, da] = a.split("-").map(Number);
   const [yb, mb, db] = b.split("-").map(Number);
@@ -27,14 +27,14 @@ export function daysBetween(a: string, b: string) {
 const stamp = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-/** Monday, because a shop's week is a working week rather than a calendar one. */
+// Monday, because a shop's week is a working week rather than a calendar one.
 export function startOfWeek(iso: string) {
   const [y, m, d] = iso.split("-").map(Number);
   const weekday = (new Date(y, m - 1, d).getDay() + 6) % 7;
   return shiftDays(iso, -weekday);
 }
 
-/** Day 0 of the following month is the last day of this one, leap years included. */
+// Day 0 of the following month is the last day of this one, leap years included.
 export function endOfMonth(iso: string) {
   const [y, m] = iso.split("-").map(Number);
   return stamp(new Date(y, m, 0));

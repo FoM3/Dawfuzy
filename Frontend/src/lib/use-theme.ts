@@ -2,11 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 
 export type ThemePreference = "system" | "light" | "dark";
 
-/**
- * The one thing that is stored. It is a display preference, not shop data: no ledger, no
- * cost, no PIN. An installed app that forgot you had chosen dark on every launch would be
- * broken, and index.html reads the same key before first paint to avoid a flash.
- */
+// The one thing that is stored. It is a display preference, not shop data: no ledger, no cost, no
+// PIN. An installed app that forgot you had chosen dark on every launch would be broken, and
+// index.html reads the same key before first paint to avoid a flash.
 export const THEME_KEY = "dawfuzy-theme";
 
 function readPreference(): ThemePreference {

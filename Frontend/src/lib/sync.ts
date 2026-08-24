@@ -3,19 +3,34 @@ import type { Account, AuditEntry, Product, Transaction } from "@/features/ledge
 
 export type SyncState = "local" | "synced" | "pending" | "offline" | "error";
 
-// ------------------------------------------------------------------ outbox ----
-// Ids of sales saved on this device that the server has not acknowledged yet. Held in
-// memory only, so it lasts as long as the tab: nothing about this app is written to
-// disk. A sale queued while offline is lost if the tab is closed before it drains.
-let outbox: string[] = [];
+// Outbox
+// Sales the server has not acknowledged yet, and the only shop data written to disk. Held
+// in memory they did not survive a reload, so an offline sale vanished silently.
+export const PENDING_KEY = "dawfuzy-unsent-sales-v1";
 
-export const readOutbox = (): string[] => outbox;
+export const readPending = (): Transaction[] => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PENDING_KEY) ?? "[]");
+    return Array.isArray(parsed) ? (parsed as Transaction[]) : [];
+  } catch {
+    return [];
+  }
+};
 
-export const writeOutbox = (ids: string[]) => { outbox = [...new Set(ids)]; };
-export const enqueue = (id: string) => writeOutbox([...readOutbox(), id]);
-export const dequeue = (ids: string[]) => writeOutbox(readOutbox().filter(id => !ids.includes(id)));
+const writePending = (sales: Transaction[]) => {
+  try {
+    if (sales.length === 0) localStorage.removeItem(PENDING_KEY);
+    else localStorage.setItem(PENDING_KEY, JSON.stringify(sales));
+  } catch {
+    // Storage full or blocked. The sale is still in memory for this session.
+  }
+};
 
-// ------------------------------------------------------------------ mapping ---
+export const addPending = (sale: Transaction) => writePending([...readPending().filter(s => s.id !== sale.id), sale]);
+export const dropPending = (ids: string[]) => writePending(readPending().filter(s => !ids.includes(s.id)));
+export const countPending = () => readPending().length;
+
+// Mapping
 const toRemoteSale = (t: Transaction, recordedBy: string | null) => ({
   id: t.id,
   product_id: t.productId ?? null,
@@ -78,7 +93,7 @@ export const toRemoteProduct = (p: Product) => ({
   updated_at: new Date().toISOString()
 });
 
-// ------------------------------------------------------------------- pull -----
+// Pull
 // Sales and the audit trail are paged by their screens (see data/queries.ts); only the
 // small whole-of-shop lists are pulled in one go.
 export async function pullProducts(client: SupabaseClient, isAdmin: boolean): Promise<Product[]> {
@@ -88,10 +103,8 @@ export async function pullProducts(client: SupabaseClient, isAdmin: boolean): Pr
   return (data ?? []).map(fromRemoteProduct);
 }
 
-/**
- * Admins read the profiles table so the Team screen can show PINs; everyone else
- * reads the people view, which has no pin column at all.
- */
+// Admins read the profiles table so the Team screen can show PINs; everyone else reads the people
+// view, which has no pin column at all.
 export async function pullPeople(client: SupabaseClient, isAdmin = false): Promise<Account[]> {
   const { data, error } = await client.from(isAdmin ? "profiles" : "people").select("*");
   if (error) throw error;
@@ -107,33 +120,29 @@ export async function pullPeople(client: SupabaseClient, isAdmin = false): Promi
   }));
 }
 
-// ------------------------------------------------------------------- push -----
-/**
- * Sends every queued sale in one upsert. Safe to call repeatedly.
- *
- * recorded_by must equal auth.uid() or the RLS insert policy rejects the row, so the id
- * comes from the live Supabase session rather than local state. With no session the
- * queue is deliberately left intact, to be sent once somebody signs in.
- */
-export async function flushOutbox(client: SupabaseClient, all: Transaction[], _userId?: string | null) {
-  const queued = readOutbox();
-  if (queued.length === 0) return { sent: 0 };
+// Push
+// Sends the signed-in person's unsent sales; device-generated ids make a retry idempotent.
+// Only their own go: recorded_by must equal auth.uid(), so another's would be miscredited.
+export async function flushOutbox(client: SupabaseClient) {
+  const pending = readPending();
+  if (pending.length === 0) return { sent: 0, sentIds: [] as string[], waiting: 0 };
 
   const { data: auth } = await client.auth.getUser();
   const userId = auth.user?.id ?? null;
-  if (!userId) return { sent: 0, waiting: queued.length };
+  if (!userId) return { sent: 0, sentIds: [] as string[], waiting: pending.length };
 
-  const payload = all.filter(t => queued.includes(t.id) && t.type === "sale").map(t => toRemoteSale(t, userId));
-  if (payload.length === 0) {
-    dequeue(queued); // queued ids with no matching sale would never drain
-    return { sent: 0 };
-  }
+  const mine = pending.filter(sale => (sale.recordedById ?? userId) === userId);
+  if (mine.length === 0) return { sent: 0, sentIds: [] as string[], waiting: pending.length };
 
-  const { error } = await client.from("sales").upsert(payload, { onConflict: "id", ignoreDuplicates: false });
+  const { error } = await client
+    .from("sales")
+    .upsert(mine.map(sale => toRemoteSale(sale, userId)), { onConflict: "id", ignoreDuplicates: false });
   if (error) throw error;
 
-  dequeue(payload.map(p => p.id));
-  return { sent: payload.length };
+  // Only now, once the server has them.
+  const sentIds = mine.map(sale => sale.id);
+  dropPending(sentIds);
+  return { sent: mine.length, sentIds, waiting: readPending().length };
 }
 
 export async function pushProduct(client: SupabaseClient, product: Product) {
@@ -141,7 +150,7 @@ export async function pushProduct(client: SupabaseClient, product: Product) {
   if (error) throw error;
 }
 
-// ------------------------------------------------------------------- audit ----
+// Audit
 type RemoteAudit = {
   id: string; action: string; actor_id: string; actor_name: string;
   subject: string; detail: string; happened_on: string; happened_at_label: string;

@@ -7,10 +7,8 @@ export type Connection =
   | { state: "no-schema" }    // project reachable, tables not created yet
   | { state: "unreachable"; detail: string };
 
-/**
- * One cheap round-trip that distinguishes the three failure modes people actually hit:
- * wrong credentials, project fine but schema never run, and no network.
- */
+// One cheap round-trip that distinguishes the three failure modes people actually hit: wrong
+// credentials, project fine but schema never run, and no network.
 export async function probeConnection(): Promise<Connection> {
   if (!isSupabaseConfigured || !supabase) return { state: "local" };
   if (!navigator.onLine) return { state: "unreachable", detail: "This device is offline" };

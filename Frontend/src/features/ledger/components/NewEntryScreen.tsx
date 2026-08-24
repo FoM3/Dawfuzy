@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { ArrowRight, Droplet, Minus, Plus, Search, Star, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowRight, Check, Droplet, Minus, Plus, Search, Star, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Eyebrow } from "@/features/marketing/components/Eyebrow";
@@ -21,13 +21,30 @@ export function NewEntryScreen(form: EntryForm) {
   const step = (by: number) => form.setQuantity(String(Math.max(1, quantityValue + by)));
 
   const [query, setQuery] = useState("");
-  const [packFilter, setPackFilter] = useState<PackType | "All">("All");
 
   // Only offer the type filter for types actually in the catalogue.
   const availableTypes = useMemo(
     () => packTypes.filter(type => form.products.some(p => p.pack === type)),
     [form.products]
   );
+
+  // Bags are what the shop sells most of, so open on them. A catalogue with none would
+  // otherwise open on an empty list, so fall back to everything.
+  const hasBags = availableTypes.includes("Bag");
+  const [packFilter, setPackFilter] = useState<PackType | "All">(hasBags ? "Bag" : "All");
+
+  // The catalogue arrives after the first render, and bags may appear or disappear when an
+  // admin edits it. Only correct an untouched filter, never one somebody chose.
+  const [filterTouched, setFilterTouched] = useState(false);
+  useEffect(() => {
+    if (filterTouched) return;
+    setPackFilter(hasBags ? "Bag" : "All");
+  }, [hasBags, filterTouched]);
+
+  function chooseFilter(next: PackType | "All") {
+    setFilterTouched(true);
+    setPackFilter(next);
+  }
 
   const visible = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -96,7 +113,7 @@ export function NewEntryScreen(form: EntryForm) {
                         type="button"
                         key={type}
                         aria-pressed={packFilter === type}
-                        onClick={() => setPackFilter(type)}
+                        onClick={() => chooseFilter(type)}
                         className={cn(
                           "rounded-full border px-3.5 py-2 text-sm2 transition-colors",
                           packFilter === type ? "border-brandtext bg-deep text-white" : "border-line bg-field text-ink hover:border-hover-line"
@@ -117,8 +134,10 @@ export function NewEntryScreen(form: EntryForm) {
             ) : (
             <div
               className={cn(
-                "grid grid-cols-2 gap-2 min-[431px]:grid-cols-[repeat(auto-fit,minmax(170px,1fr))] min-[431px]:gap-2.5",
-                scrolls && "max-h-105 overflow-y-auto pr-1"
+                // One column of compact rows on a phone: two columns of cards made every
+                // longer name wrap and fitted only three on screen at a time.
+                "grid grid-cols-1 gap-1.5 min-[431px]:grid-cols-[repeat(auto-fit,minmax(170px,1fr))] min-[431px]:gap-2.5",
+                scrolls && "max-h-105 overflow-y-auto overscroll-contain pr-1"
               )}
             >
               {visible.map((product, index) => {
@@ -131,19 +150,27 @@ export function NewEntryScreen(form: EntryForm) {
                     aria-pressed={isPicked}
                     onClick={() => form.selectProduct(product.id)}
                     className={cn(
-                      "relative grid justify-items-start gap-1 rounded border bg-field p-3 text-left text-ink transition-colors min-[431px]:p-3.5",
+                      "relative flex items-center gap-3 rounded border bg-field p-2.5 text-left text-ink transition-colors",
+                      "min-[431px]:flex-col min-[431px]:items-start min-[431px]:gap-1 min-[431px]:p-3.5",
                       isPicked ? "border-brandtext bg-select shadow-[0_0_0_1px_var(--brandtext)_inset]" : "border-line hover:border-hover-line"
                     )}
                   >
-                    <span className="mb-1.5 grid size-8 place-items-center rounded-full bg-info-soft text-info">
+                    <span className="grid size-9 shrink-0 place-items-center rounded-full bg-info-soft text-info min-[431px]:mb-1.5 min-[431px]:size-8">
                       <Droplet className="size-4.5" aria-hidden="true" />
                     </span>
-                    <strong className="text-md2 leading-tight">{product.name}</strong>
-                    <small className="text-sm2 text-subtle">
-                      {money(product.price)} · {product.pack}
-                    </small>
+                    <span className="grid min-w-0 flex-1 gap-0.5 min-[431px]:flex-none">
+                      <strong className="truncate text-md2 leading-tight min-[431px]:whitespace-normal">
+                        {product.name}
+                      </strong>
+                      <small className="truncate text-sm2 whitespace-nowrap text-subtle min-[431px]:whitespace-normal">
+                        {money(product.price)} · {product.pack}
+                      </small>
+                    </span>
+                    {isPicked && (
+                      <Check className="size-4.5 shrink-0 text-brandtext min-[431px]:hidden" aria-hidden="true" />
+                    )}
                     {isTopSeller && (
-                      <span className="absolute top-2.5 right-2.5 inline-flex items-center gap-1 rounded-full bg-gold-soft px-2 py-0.5 text-xs2 text-gold-ink">
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-gold-soft px-2 py-0.5 text-xs2 text-gold-ink min-[431px]:absolute min-[431px]:top-2.5 min-[431px]:right-2.5">
                         <Star className="size-3" aria-hidden="true" /> Top
                       </span>
                     )}

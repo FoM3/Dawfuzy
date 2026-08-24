@@ -1,4 +1,4 @@
--- Dawfuzy Water Ledger — Supabase schema.
+-- Dawfuzy Water Ledger: the Supabase schema.
 -- Run this once in the Supabase SQL editor.
 --
 -- Design notes:
@@ -694,7 +694,7 @@ grant select on public.people        to anon, authenticated;
 
 
 -- ============================================================================
---  PRODUCTS  — the shop's real catalogue
+--  PRODUCTS: the shop's real catalogue
 -- ============================================================================
 -- Safe to re-run: existing rows are updated rather than duplicated. cost_price is
 -- seeded equal to price because the price list carries no cost figures; that shows
@@ -726,7 +726,7 @@ on conflict (id) do update
       price = excluded.price;
 
 -- ============================================================================
---  BOOTSTRAP THE OWNER  — edit the two values, then run
+--  BOOTSTRAP THE OWNER: edit the two values, then run
 -- ============================================================================
 -- Only an admin can create an admin, so the very first one is made here by hand.
 -- That is what stops anyone signing themselves up as an admin.

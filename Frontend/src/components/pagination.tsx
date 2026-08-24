@@ -13,7 +13,7 @@ type Props = {
 const button =
   "inline-flex items-center gap-1.5 rounded border border-line bg-field px-3 py-2 text-sm2 whitespace-nowrap text-ink transition-colors hover:border-brandtext disabled:pointer-events-none disabled:opacity-40";
 
-/** Says what is on screen out of what exists, so a page is never mistaken for the whole. */
+// Says what is on screen out of what exists, so a page is never mistaken for the whole.
 export function Pagination({ page, total, pageSize, setPage, busy = false, noun = "records" }: Props) {
   const pages = Math.max(Math.ceil(total / pageSize), 1);
   const first = total === 0 ? 0 : page * pageSize + 1;

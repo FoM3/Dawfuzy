@@ -158,7 +158,7 @@ export function ProductsScreen({ products, addProduct, updateProduct }: Props) {
             No products match “{query}”.
           </p>
         ) : (
-        /* min-w-0: as a flex child this defaults to min-width:auto and would push the page wide. */
+        // min-w-0: as a flex child this defaults to min-width:auto and would push the page wide.
         <div className="w-full min-w-0 overflow-x-auto">
           <table className="w-full border-collapse">
             <thead>

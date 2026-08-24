@@ -53,7 +53,7 @@ select count(*) as sales, min(sold_on) as first_day, max(sold_on) as last_day fr
 
 
 -- ============================================================================
---  UNDO  — removes every sale, demo and real alike. There is no way to tell them
+--  UNDO: removes every sale, demo and real alike. There is no way to tell them
 --  apart, so only run this while the ledger is still just a sandbox.
 -- ============================================================================
 -- delete from public.sales;
