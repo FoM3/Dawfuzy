@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
-import { PencilLine, Trash2 } from "lucide-react";
+import { FileDown, PencilLine, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,10 +14,11 @@ import { Eyebrow } from "@/features/marketing/components/Eyebrow";
 import { money, today, toNumber } from "@/lib/format";
 import { formatDay, isSale, saleProfit, shiftDays, startOfMonth, totalOf, withinRange } from "@/lib/ledger";
 import { Pagination } from "@/components/pagination";
-import { PAGE_SIZE, useSalesPage, useSalesTotals } from "@/features/ledger/data/queries";
+import { PAGE_SIZE, fetchAllSales, useSalesPage, useSalesTotals } from "@/features/ledger/data/queries";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
-import type { DateRangePreset, Product, Transaction } from "@/features/ledger/types";
+import { ExportSheet } from "@/features/ledger/components/ExportSheet";
+import type { Account, DateRangePreset, Product, Transaction } from "@/features/ledger/types";
 
 const allPresets: { key: DateRangePreset; label: string }[] = [
   { key: "today", label: "Today" },
@@ -28,10 +31,7 @@ const allPresets: { key: DateRangePreset; label: string }[] = [
 function rangeFor(preset: DateRangePreset): { from: string; to: string } {
   const now = today();
   if (preset === "today") return { from: now, to: now };
-  if (preset === "yesterday") {
-    const then = shiftDays(now, -1);
-    return { from: then, to: then };
-  }
+  if (preset === "yesterday") return { from: shiftDays(now, -1), to: shiftDays(now, -1) };
   if (preset === "week") return { from: shiftDays(now, -6), to: now };
   if (preset === "month") return { from: startOfMonth(now), to: now };
   return { from: "", to: "" };
@@ -45,15 +45,17 @@ const td = "px-3 py-3.5 text-md2 align-top";
 type HistoryProps = {
   transactions: Transaction[];
   products: Product[];
+  people: Account[];
   isAdmin: boolean;
   currentId: string;
+  currentName: string;
   correctSale: (
     sale: Transaction,
     next: { quantity: number; productId: string } | null
   ) => Promise<string | null>;
 };
 
-export function SalesHistoryScreen({ transactions, products, isAdmin, currentId, correctSale }: HistoryProps) {
+export function SalesHistoryScreen({ transactions, products, people, isAdmin, currentId, currentName, correctSale }: HistoryProps) {
   const canSeeProfit = isAdmin;
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [removing, setRemoving] = useState<Transaction | null>(null);
@@ -88,9 +90,12 @@ export function SalesHistoryScreen({ transactions, products, isAdmin, currentId,
   // The same rule the server enforces, so the button is not offered where it would fail.
   const canCorrect = (sale: Transaction) =>
     isAdmin || (sale.recordedById === currentId && sale.date === today());
-  const presets = isAdmin
-    ? allPresets
-    : allPresets.filter(preset => preset.key === "today" || preset.key === "yesterday" || preset.key === "week");
+
+  const [exportOpen, setExportOpen] = useState(false);
+  // Users get the ranges a shift needs; the wider ones, and the free date fields that
+  // could reach them, stay admin-only.
+  const staffPresets: DateRangePreset[] = ["today", "yesterday", "week"];
+  const presets = isAdmin ? allPresets : allPresets.filter(preset => staffPresets.includes(preset.key));
   const [preset, setPreset] = useState<DateRangePreset>("today");
   const [from, setFrom] = useState(rangeFor("today").from);
   const [to, setTo] = useState(rangeFor("today").to);
@@ -145,13 +150,23 @@ export function SalesHistoryScreen({ transactions, products, isAdmin, currentId,
 
   return (
     <div className="mx-auto max-w-[1450px] px-[clamp(22px,4vw,55px)] pt-9 pb-[calc(var(--nav-height)+var(--safe-bottom)+32px)] lg:pb-15">
-      <div className="mb-6 lg:mb-8">
-        <Eyebrow>Sales history</Eyebrow>
-        <h2 className="m-0 font-serif text-[clamp(32px,4vw,54px)] leading-none font-medium tracking-[-2px]">
-          Every sale,
-          <br />
-          <em className="font-medium text-accent">on the record.</em>
-        </h2>
+      <div className="mb-6 flex flex-col justify-between gap-5 sm:flex-row sm:items-end lg:mb-8">
+        <div>
+          <Eyebrow>Sales history</Eyebrow>
+          <h2 className="m-0 font-serif text-[clamp(32px,4vw,54px)] leading-none font-medium tracking-[-2px]">
+            Every sale,
+            <br />
+            <em className="font-medium text-accent">on the record.</em>
+          </h2>
+        </div>
+        <Button
+          variant="outline"
+          onClick={() => setExportOpen(true)}
+          className="h-12 shrink-0 gap-2.5 border-line px-5 text-md2"
+        >
+          <FileDown className="size-4.5" aria-hidden="true" />
+          Export PDF
+        </Button>
       </div>
 
       <Card className="mb-4 gap-0 rounded-none border-line bg-panel p-4.5 shadow-none min-[431px]:p-6">
@@ -331,6 +346,17 @@ export function SalesHistoryScreen({ transactions, products, isAdmin, currentId,
           noun="sales"
         />
       </Card>
+
+      <ExportSheet
+        open={exportOpen}
+        setOpen={setExportOpen}
+        kind="sales"
+        isAdmin={isAdmin}
+        accountName={currentName}
+        products={products}
+        people={people}
+        localTransactions={transactions}
+      />
 
       <AlertDialog open={!!editing} onOpenChange={o => !o && setEditing(null)}>
         <AlertDialogContent>

@@ -21,9 +21,11 @@
     <div id="root"></div>
     <script>
       // Applied before first paint so a dark user never sees a flash of the light theme.
+      // Reads the same key as use-theme.ts; keep the two in step.
       (function () {
         try {
-          if (matchMedia("(prefers-color-scheme: dark)").matches) {
+          var pref = localStorage.getItem("dawfuzy-theme") || "system";
+          if (pref === "dark" || (pref !== "light" && matchMedia("(prefers-color-scheme: dark)").matches)) {
             document.documentElement.classList.add("dark");
             var m = document.querySelector('meta[name="theme-color"]');
             if (m) m.setAttribute("content", "#0f1518");

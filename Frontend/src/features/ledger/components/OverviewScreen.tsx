@@ -1,18 +1,24 @@
 ﻿import { useMemo, useState } from "react";
-import { Minus, TrendingDown, TrendingUp } from "lucide-react";
+import { FileDown, Minus, TrendingDown, TrendingUp } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Eyebrow } from "@/features/marketing/components/Eyebrow";
 import { money } from "@/lib/format";
-import { daysBetween, isSale, saleProfit, shiftDays, startOfMonth, totalOf, withinRange } from "@/lib/ledger";
+import {
+  daysBetween, endOfMonth, isSale, saleProfit, shiftDays, shiftMonths,
+  startOfMonth, startOfWeek, totalOf, withinRange
+} from "@/lib/ledger";
 import { useSalesByDay, useSalesByPerson, useSalesByProduct, useSalesSpan, useSalesTotals } from "@/features/ledger/data/queries";
 import { isSupabaseConfigured } from "@/lib/supabase";
+import { ExportSheet } from "@/features/ledger/components/ExportSheet";
 import { cn } from "@/lib/utils";
-import type { Transaction } from "@/features/ledger/types";
+import type { Account, Product, Transaction } from "@/features/ledger/types";
 
 const th = "px-4 py-3 text-left text-xs2 font-bold tracking-[1.4px] text-subtle uppercase whitespace-nowrap";
 const td = "px-4 py-3.5 text-md2 align-middle";
 
-const ranges = ["today", "yesterday", "7 days", "30 days", "this month", "all time"] as const;
+const ranges = ["today", "yesterday", "7 days", "this month", "all time"] as const;
 type Range = (typeof ranges)[number];
 
 // Inclusive bounds for the picked range. Empty strings mean unbounded.
@@ -24,7 +30,7 @@ function boundsFor(range: Range, today: string): { from: string; to: string } {
     return { from: then, to: then };
   }
   if (range === "this month") return { from: startOfMonth(today), to: today };
-  return { from: shiftDays(today, range === "7 days" ? -6 : -29), to: today };
+  return { from: shiftDays(today, -6), to: today };
 }
 
 // The equally long window immediately before this one, which is what the deltas compare
@@ -41,7 +47,6 @@ const comparedTo: Record<Range, string> = {
   today: "yesterday",
   yesterday: "the day before",
   "7 days": "the 7 days before",
-  "30 days": "the 30 days before",
   "this month": "the days before",
   "all time": ""
 };
@@ -57,8 +62,17 @@ const summarise = (rows: Transaction[]) => ({
   count: rows.length
 });
 
-export function OverviewScreen({ transactions }: { transactions: Transaction[] }) {
+type OverviewProps = {
+  transactions: Transaction[];
+  products: Product[];
+  people: Account[];
+  isAdmin: boolean;
+  accountName: string;
+};
+
+export function OverviewScreen({ transactions, products: catalogue, people: accounts, isAdmin, accountName }: OverviewProps) {
   const [range, setRange] = useState<Range>("today");
+  const [exportOpen, setExportOpen] = useState(false);
   // Fixed for the life of the screen, so every figure is measured against one "now".
   const today = useMemo(() => {
     const d = new Date();
@@ -69,6 +83,7 @@ export function OverviewScreen({ transactions }: { transactions: Transaction[] }
 
   const { from, to } = boundsFor(range, today);
   const previous = previousBounds(from, to);
+  const against = comparedTo[range];
   const trendFrom = shiftDays(today, -13);
 
   // Every figure is a server-side rollup over the whole range. Summing what happens to be
@@ -146,7 +161,6 @@ export function OverviewScreen({ transactions }: { transactions: Transaction[] }
     1
   );
 
-  const against = comparedTo[range];
   const margin = now.revenue > 0 ? (now.profit / now.revenue) * 100 : 0;
   const perDay = now.revenue / days;
   const perSale = now.count > 0 ? now.revenue / now.count : 0;
@@ -163,7 +177,16 @@ export function OverviewScreen({ transactions }: { transactions: Transaction[] }
             <em className="font-medium text-accent">is doing.</em>
           </h2>
         </div>
-        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Date range">
+        <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
+          <Button
+            variant="outline"
+            onClick={() => setExportOpen(true)}
+            className="h-11 shrink-0 gap-2.5 border-line px-4 text-md2"
+          >
+            <FileDown className="size-4.5" aria-hidden="true" />
+            Export PDF
+          </Button>
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Date range">
           {ranges.map(option => (
             <button
               key={option}
@@ -179,7 +202,8 @@ export function OverviewScreen({ transactions }: { transactions: Transaction[] }
             >
               {option}
             </button>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
 
@@ -344,6 +368,17 @@ export function OverviewScreen({ transactions }: { transactions: Transaction[] }
           </div>
         )}
       </Card>
+
+      <ExportSheet
+        open={exportOpen}
+        setOpen={setExportOpen}
+        kind="summary"
+        isAdmin={isAdmin}
+        accountName={accountName}
+        products={catalogue}
+        people={accounts}
+        localTransactions={transactions}
+      />
     </div>
   );
 }

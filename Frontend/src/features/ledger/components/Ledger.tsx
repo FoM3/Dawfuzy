@@ -450,7 +450,15 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
       <LedgerSidebar screen={screen} setScreen={setScreen} role={account.role} />
       <main className="min-w-0">
         <LedgerHeader screen={screen} account={account} sync={sync} editAccount={() => setScreen("account")} />
-        {screen === "overview" && isAdmin && <OverviewScreen transactions={transactions} />}
+        {screen === "overview" && isAdmin && (
+          <OverviewScreen
+            transactions={transactions}
+            products={products}
+            people={accounts}
+            isAdmin={isAdmin}
+            accountName={account.name}
+          />
+        )}
         {screen === "entry" && (
           <NewEntryScreen
             products={products}
@@ -469,8 +477,10 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
           <SalesHistoryScreen
             transactions={transactions}
             products={products}
+            people={accounts}
             isAdmin={isAdmin}
             currentId={account.id}
+            currentName={account.name}
             correctSale={correctSale}
           />
         )}
@@ -498,7 +508,9 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
         )}
       </main>
       <LedgerMobileNav screen={screen} setScreen={setScreen} role={account.role} />
-      <Toaster position="bottom-center" offset={{ bottom: "calc(var(--nav-height) + var(--safe-bottom) + 16px)" }} />
+      {/* Top, not bottom: the mobile tab bar sits over the bottom of the screen and was
+          covering the confirmation that a sale had saved. */}
+      <Toaster position="top-center" offset={{ top: "calc(var(--safe-top) + 12px)" }} />
     </div>
   );
 }

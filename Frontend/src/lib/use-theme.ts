@@ -2,6 +2,22 @@ import { useCallback, useEffect, useState } from "react";
 
 export type ThemePreference = "system" | "light" | "dark";
 
+/**
+ * The one thing that is stored. It is a display preference, not shop data: no ledger, no
+ * cost, no PIN. An installed app that forgot you had chosen dark on every launch would be
+ * broken, and index.html reads the same key before first paint to avoid a flash.
+ */
+export const THEME_KEY = "dawfuzy-theme";
+
+function readPreference(): ThemePreference {
+  try {
+    const stored = localStorage.getItem(THEME_KEY);
+    return stored === "light" || stored === "dark" || stored === "system" ? stored : "system";
+  } catch {
+    return "system";
+  }
+}
+
 function resolve(preference: ThemePreference) {
   if (preference !== "system") return preference;
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
@@ -17,12 +33,16 @@ function apply(preference: ThemePreference) {
 }
 
 export function useTheme() {
-  // Not stored: every load starts on the OS preference, and the toggle lasts the visit.
-  const [preference, setPreference] = useState<ThemePreference>("system");
+  const [preference, setPreference] = useState<ThemePreference>(readPreference);
   const [resolved, setResolved] = useState<"light" | "dark">(() => apply(preference));
 
   useEffect(() => {
     setResolved(apply(preference));
+    try {
+      localStorage.setItem(THEME_KEY, preference);
+    } catch {
+      // Storage blocked; the choice still holds for this visit.
+    }
   }, [preference]);
 
   // Follow the OS while the preference is "system".

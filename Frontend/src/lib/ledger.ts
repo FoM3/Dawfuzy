@@ -24,6 +24,27 @@ export function daysBetween(a: string, b: string) {
   return Math.round((new Date(yb, mb - 1, db).getTime() - new Date(ya, ma - 1, da).getTime()) / 86_400_000);
 }
 
+const stamp = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+/** Monday, because a shop's week is a working week rather than a calendar one. */
+export function startOfWeek(iso: string) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const weekday = (new Date(y, m - 1, d).getDay() + 6) % 7;
+  return shiftDays(iso, -weekday);
+}
+
+/** Day 0 of the following month is the last day of this one, leap years included. */
+export function endOfMonth(iso: string) {
+  const [y, m] = iso.split("-").map(Number);
+  return stamp(new Date(y, m, 0));
+}
+
+export function shiftMonths(iso: string, months: number) {
+  const [y, m] = iso.split("-").map(Number);
+  return stamp(new Date(y, m - 1 + months, 1));
+}
+
 export function startOfMonth(iso: string) {
   const [y, m] = iso.split("-");
   return `${y}-${m}-01`;

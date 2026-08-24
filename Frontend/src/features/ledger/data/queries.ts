@@ -59,6 +59,35 @@ export function useSalesPage(from: string, to: string, page: number, isAdmin: bo
   });
 }
 
+/**
+ * Every sale in a range, for the PDF export. The screen only ever holds one page, and a
+ * report of page 1 would be a quietly wrong document, so this walks the whole range.
+ * Chunked because PostgREST caps a single response.
+ */
+export async function fetchAllSales(
+  from: string,
+  to: string,
+  isAdmin: boolean,
+  filters: { person?: string; productId?: string } = {}
+): Promise<Transaction[]> {
+  const table = isAdmin ? "/sales" : "/sales_public";
+  const params: Record<string, string> = {
+    select: "*",
+    order: "sold_on.desc,created_at.desc",
+    ...rangeParams(from, to),
+    ...(filters.person ? { recorded_by_name: `eq.${filters.person}` } : {}),
+    ...(filters.productId ? { product_id: `eq.${filters.productId}` } : {})
+  };
+  const chunk = 1000;
+  const rows: Transaction[] = [];
+
+  for (let page = 0; ; page++) {
+    const result = await fetchPage<RemoteSale>(table, params, page, chunk);
+    rows.push(...result.rows.map(toTransaction));
+    if (rows.length >= result.total || result.rows.length === 0) return rows;
+  }
+}
+
 type Totals = { revenue: number; profit: number; units: number; sale_count: number };
 
 /** Totals across the whole range, not the loaded page. */

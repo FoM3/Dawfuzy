@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { registerSW } from "virtual:pwa-register";
+import { THEME_KEY } from "@/lib/use-theme";
 import App from "./App";
 import "./styles.css";
 
@@ -17,11 +18,12 @@ const queryClient = new QueryClient({
   }
 });
 
-// Earlier versions cached the ledger on the device, staff PINs included. Nothing is
-// stored now, so clear what those versions left behind rather than let it sit there.
+// Earlier versions cached the ledger on the device, staff PINs included. None of that is
+// stored now, so clear what those versions left behind. The theme is the one key that
+// survives: it is a display preference and holds nothing about the shop.
 try {
   for (const key of Object.keys(localStorage)) {
-    if (key.startsWith("dawfuzy-")) localStorage.removeItem(key);
+    if (key.startsWith("dawfuzy-") && key !== THEME_KEY) localStorage.removeItem(key);
   }
 } catch {
   // Storage disabled or blocked; there is nothing to clean up either way.
