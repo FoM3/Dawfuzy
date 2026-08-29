@@ -86,6 +86,10 @@ create table if not exists public.products (
   pack text not null check (pack in ('Pack', 'Bag', 'Dispenser')),
   cost_price numeric(10,2) not null default 0,
   price numeric(10,2) not null default 0,
+  -- Set instead of deleting: a retired product leaves the sale picker but keeps its place
+  -- on every past sale and in the reports. Deleting it would orphan nothing, since a sale
+  -- snapshots the name and prices, but the catalogue would stop explaining the history.
+  retired_at timestamptz,
   updated_at timestamptz not null default now()
 );
 
@@ -105,6 +109,9 @@ create table if not exists public.sales (
   sold_at_label text not null default '',    -- the "9:42 AM" shown in the UI
   recorded_by uuid references auth.users(id) on delete set null,
   recorded_by_name text not null default '',   -- copied in so attribution survives deletion
+  -- Whatever the person wants to remember about this sale: who bought it, that it was
+  -- paid later, a damaged pack. Free text, always optional, never parsed.
+  note text not null default '',
   created_at timestamptz not null default now()
 );
 
@@ -125,6 +132,8 @@ update public.profiles p
   from auth.users u
  where u.id = p.id and coalesce(p.login_email, '') = '';
 alter table public.sales    add column if not exists recorded_by_name text not null default '';
+alter table public.products add column if not exists retired_at timestamptz;
+alter table public.sales    add column if not exists note text not null default '';
 
 alter table public.profiles drop constraint if exists profiles_role_check;
 alter table public.profiles add  constraint profiles_role_check
@@ -427,10 +436,15 @@ $$;
 -- Only the quantity and the item can be corrected. Prices are never accepted from the
 -- caller: they are read from the catalogue here, so nobody can rewrite what a sale was
 -- worth, and a user with no sight of cost cannot move the margin.
+-- Dropped first: adding an argument creates a second overload rather than replacing the
+-- function, and PostgREST would then have two candidates to choose between.
+drop function if exists public.update_sale(uuid, integer, uuid);
+
 create or replace function public.update_sale(
   sale_id uuid,
   new_quantity integer,
-  new_product_id uuid
+  new_product_id uuid,
+  new_note text
 )
 returns void
 language plpgsql
@@ -476,14 +490,16 @@ begin
            item       = chosen.name,
            unit_price = chosen.price,
            cost_price = chosen.cost_price,
-           amount     = new_quantity * chosen.price
+           amount     = new_quantity * chosen.price,
+           note       = coalesce(new_note, '')
      where id = sale_id;
   else
     -- Same item: keep the prices captured at the time of sale. Re-reading them from the
     -- catalogue would let a later price change silently rewrite an old sale.
     update public.sales
        set quantity = new_quantity,
-           amount   = new_quantity * unit_price
+           amount   = new_quantity * unit_price,
+           note     = coalesce(new_note, '')
      where id = sale_id;
   end if;
 end;
@@ -518,7 +534,7 @@ begin
 end;
 $$;
 
-grant execute on function public.update_sale(uuid, integer, uuid) to authenticated;
+grant execute on function public.update_sale(uuid, integer, uuid, text) to authenticated;
 grant execute on function public.delete_sale(uuid)                to authenticated;
 
 -- ------------------------------------------------------------- aggregates ----
@@ -642,11 +658,13 @@ grant execute on function public.sales_span()                 to authenticated;
 -- deliberately bypass the base-table policies above and expose only safe columns.
 
 create or replace view public.products_public as
-  select id, name, description, pack, price, updated_at from public.products;
+  -- retired_at goes last: create or replace can only append columns, never slot one in.
+  select id, name, description, pack, price, updated_at, retired_at from public.products;
 
 create or replace view public.sales_public as
+  -- note goes last for the same reason retired_at does: replace can only append.
   select id, product_id, item, quantity, unit_price, amount, sold_on, sold_at_label,
-         recorded_by, recorded_by_name, created_at
+         recorded_by, recorded_by_name, created_at, note
   from public.sales;
 
 -- The sign-in screen lists names before anyone is authenticated. Deliberately no pin,
@@ -720,10 +738,10 @@ insert into public.products (id, name, description, pack, cost_price, price) val
   ('06459da4-9015-468f-a50d-7dc23c726ed7', 'Bel-Aqua 500ml', '', 'Pack', 30, 30),
   ('eb245c84-0f0e-4674-9022-393d2445f514', 'Bel-Aqua Active', '', 'Pack', 42, 42),
   ('b9e17a83-7680-4fc9-b9e3-3499a810ba5e', 'Bel-Aqua 750ml', '', 'Pack', 35, 35)
-on conflict (id) do update
-  set name = excluded.name,
-      pack = excluded.pack,
-      price = excluded.price;
+-- do nothing, not do update: this file gets re-run to pick up schema changes, and the
+-- catalogue is edited from the Products screen. Overwriting on conflict would quietly
+-- reset every price a re-run touched. New installs still get the full list.
+on conflict (id) do nothing;
 
 -- ============================================================================
 --  BOOTSTRAP THE OWNER: edit the two values, then run

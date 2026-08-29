@@ -21,7 +21,7 @@ const rangeParams = (from: string, to: string): Record<string, string> => {
 type RemoteSale = {
   id: string; product_id: string | null; item: string; quantity: number;
   unit_price: number; cost_price?: number; amount: number; sold_on: string;
-  sold_at_label: string; recorded_by?: string | null; recorded_by_name?: string;
+  sold_at_label: string; recorded_by?: string | null; recorded_by_name?: string; note?: string;
 };
 
 const toTransaction = (r: RemoteSale): Transaction => ({
@@ -37,7 +37,8 @@ const toTransaction = (r: RemoteSale): Transaction => ({
   date: r.sold_on,
   time: r.sold_at_label,
   recordedById: r.recorded_by ?? undefined,
-  recordedBy: r.recorded_by_name || undefined
+  recordedBy: r.recorded_by_name || undefined,
+  note: r.note || undefined
 });
 
 // One page of sales for a date range, newest first.
@@ -170,9 +171,19 @@ type RemoteAudit = {
 
 // Corrects a recorded sale. The server decides who may touch which row, so the UI only has to
 // offer the button; it cannot grant itself permission by hiding the rule.
-export async function updateSale(id: string, quantity: number, productId: string): Promise<string | null> {
+export async function updateSale(
+  id: string,
+  quantity: number,
+  productId: string,
+  note: string
+): Promise<string | null> {
   try {
-    await callRpc("update_sale", { sale_id: id, new_quantity: quantity, new_product_id: productId });
+    await callRpc("update_sale", {
+      sale_id: id,
+      new_quantity: quantity,
+      new_product_id: productId,
+      new_note: note
+    });
     return null;
   } catch (error) {
     return explainApiError(error);
@@ -188,16 +199,31 @@ export async function deleteSale(id: string): Promise<string | null> {
   }
 }
 
-// One page of the audit trail, newest first.
-export function useAuditPage(page: number, enabled: boolean) {
+export type AuditFilters = { from: string; to: string; action: string; actor: string };
+
+// The trail is filtered server-side, not on the page: filtering the twenty rows already
+// loaded would search one page and look empty for anything older.
+export function useAuditPage(page: number, enabled: boolean, filters: AuditFilters) {
+  const { from, to, action, actor } = filters;
   return useQuery({
-    queryKey: ["audit", "page", { page }],
+    queryKey: ["audit", "page", { page, from, to, action, actor }],
     enabled: enabled && isSupabaseConfigured,
     placeholderData: previous => previous,
     queryFn: async () => {
+      const dates: Record<string, string> =
+        from && to ? { and: `(happened_on.gte.${from},happened_on.lte.${to})` }
+        : from ? { happened_on: `gte.${from}` }
+        : to ? { happened_on: `lte.${to}` }
+        : {};
       const result = await fetchPage<RemoteAudit>(
         "/audit_log",
-        { select: "*", order: "created_at.desc" },
+        {
+          select: "*",
+          order: "created_at.desc",
+          ...dates,
+          ...(action ? { action: `eq.${action}` } : {}),
+          ...(actor ? { actor_name: `eq.${actor}` } : {})
+        },
         page,
         PAGE_SIZE
       );

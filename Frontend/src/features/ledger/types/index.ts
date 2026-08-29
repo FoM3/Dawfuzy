@@ -7,6 +7,9 @@ export type Product = {
   pack: PackType;
   costPrice: number;
   price: number;
+  // Set when the product is withdrawn from sale. It stays in the catalogue and on every
+  // past sale; it just stops being offered.
+  retiredAt?: string | null;
   // Parked with the stock feature; kept so InventoryScreen still compiles.
   stock: number;
   // Parked with the stock feature; kept so InventoryScreen still compiles.
@@ -28,6 +31,8 @@ export type Transaction = {
   amount: number;
   date: string;
   time: string;
+  // Anything worth remembering about this sale. Optional and free-form.
+  note?: string;
   // Who rang it up. Copied in, so removing the person keeps the attribution.
   recordedById?: string;
   recordedBy?: string;
@@ -54,11 +59,14 @@ export type Account = {
 };
 
 // Screens a plain user may reach. Admins get everything.
-export const userScreens: LedgerScreen[] = ["entry", "history", "account"];
+// Products is read-only for them: no cost, no profit, no editing.
+export const userScreens: LedgerScreen[] = ["entry", "history", "products", "account"];
 
 export type AuditAction =
   | "product.added"
   | "product.updated"
+  | "product.retired"
+  | "product.restored"
   | "person.added"
   | "person.updated"
   | "person.removed"
@@ -97,6 +105,8 @@ export type EntryForm = {
   selectProduct: (id: string) => void;
   quantity: string;
   setQuantity: (value: string) => void;
+  note: string;
+  setNote: (value: string) => void;
   quantityValue: number;
   submit: (event: React.FormEvent) => void;
   // Units sold per product, all time; drives most-sold-first ordering in the picker.

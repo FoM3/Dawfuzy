@@ -42,13 +42,14 @@ const toRemoteSale = (t: Transaction, recordedBy: string | null) => ({
   sold_on: t.date,
   sold_at_label: t.time,
   recorded_by: recordedBy,
-  recorded_by_name: t.recordedBy ?? ""
+  recorded_by_name: t.recordedBy ?? "",
+  note: t.note ?? ""
 });
 
 type RemoteSale = {
   id: string; product_id: string | null; item: string; quantity: number;
   unit_price: number; cost_price?: number; amount: number; sold_on: string; sold_at_label: string;
-  recorded_by?: string | null; recorded_by_name?: string;
+  recorded_by?: string | null; recorded_by_name?: string; note?: string;
 };
 
 const fromRemoteSale = (r: RemoteSale): Transaction => ({
@@ -64,12 +65,13 @@ const fromRemoteSale = (r: RemoteSale): Transaction => ({
   date: r.sold_on,
   time: r.sold_at_label,
   recordedById: r.recorded_by ?? undefined,
-  recordedBy: r.recorded_by_name || undefined
+  recordedBy: r.recorded_by_name || undefined,
+  note: r.note || undefined
 });
 
 type RemoteProduct = {
   id: string; name: string; description: string; pack: string;
-  price: number; cost_price?: number;
+  price: number; cost_price?: number; retired_at?: string | null;
 };
 
 const fromRemoteProduct = (r: RemoteProduct): Product => ({
@@ -79,6 +81,7 @@ const fromRemoteProduct = (r: RemoteProduct): Product => ({
   pack: r.pack as Product["pack"],
   costPrice: Number(r.cost_price ?? 0),
   price: Number(r.price),
+  retiredAt: r.retired_at ?? null,
   stock: 0,
   reorderAt: 10
 });
@@ -90,6 +93,7 @@ export const toRemoteProduct = (p: Product) => ({
   pack: p.pack,
   cost_price: p.costPrice,
   price: p.price,
+  retired_at: p.retiredAt ?? null,
   updated_at: new Date().toISOString()
 });
 

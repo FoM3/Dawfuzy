@@ -110,6 +110,7 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
   }, [account, screen, setScreen]);
   const [productId, setProductId] = useState(products[0].id);
   const [quantity, setQuantity] = useState("1");
+  const [note, setNote] = useState("");
   const selected = products.find(product => product.id === productId) ?? products[0];
 
   const quantityValue = toNumber(quantity);
@@ -277,15 +278,21 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
 
   // Corrects or removes a recorded sale. Sales are append-only apart from this, so every
   // correction is written to the audit trail: the figure can change, but not quietly.
-  async function correctSale(sale: Transaction, next: { quantity: number; productId: string } | null) {
-    const message = next ? await updateSale(sale.id, next.quantity, next.productId) : await deleteSale(sale.id);
+  async function correctSale(
+    sale: Transaction,
+    next: { quantity: number; productId: string; note: string } | null
+  ) {
+    const message = next
+      ? await updateSale(sale.id, next.quantity, next.productId, next.note)
+      : await deleteSale(sale.id);
     if (message) return message;
 
     if (next) {
       const item = products.find(p => p.id === next.productId);
       const changes = [
         sale.quantity !== next.quantity ? `Quantity ${sale.quantity} → ${next.quantity}` : null,
-        item && sale.productId !== next.productId ? `Item ${sale.item} → ${item.name}` : null
+        item && sale.productId !== next.productId ? `Item ${sale.item} → ${item.name}` : null,
+        (sale.note ?? "") !== next.note ? (next.note ? `Note: ${next.note}` : "Note cleared") : null
       ].filter(Boolean) as string[];
       record("sale.updated", `${item?.name ?? sale.item} · ${formatDay(sale.date)}`, changes.join(" · "));
       toast.success("Sale corrected");
@@ -365,6 +372,7 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
       unitPrice: selected.price,
       costPrice: selected.costPrice,
       amount: quantityValue * selected.price,
+      note: note.trim() || undefined,
       date: today(),
       time: clockTime(),
       recordedById: sessionId ?? undefined,
@@ -372,6 +380,7 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
     };
     setTransactions([...transactions, entry]);
     setQuantity("1");
+    setNote("");
     if (supabase) {
       // Written to the device before anything is attempted over the network, so the sale
       // survives a dropped connection, a reload, or the tab being closed.
@@ -416,6 +425,18 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
     record("product.added", product.name, `${product.pack} · sells at ${money(product.price)}`);
     toast.success(`${product.name} added to the catalogue`);
     return true;
+  }
+
+  // Retiring takes a product off the New sale screen without touching a single past sale,
+  // which still carries the name and prices it was sold at.
+  function setProductRetired(id: string, retired: boolean) {
+    const target = products.find(p => p.id === id);
+    if (!target) return;
+    const next = { ...target, retiredAt: retired ? new Date().toISOString() : null };
+    setProducts(products.map(p => (p.id === id ? next : p)));
+    if (supabase) void pushProduct(supabase, next).catch(() => setSync("error"));
+    record(retired ? "product.retired" : "product.restored", target.name, retired ? "Off the sale screen" : "Back on sale");
+    toast.success(retired ? `${target.name} retired` : `${target.name} is back on sale`);
   }
 
   // Only future sales see the new prices; past transactions keep their own snapshot.
@@ -471,6 +492,8 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
             selectProduct={selectProduct}
             quantity={quantity}
             setQuantity={setQuantity}
+            note={note}
+            setNote={setNote}
             quantityValue={quantityValue}
             submit={submit}
             popularity={popularity}
@@ -488,12 +511,21 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
             correctSale={correctSale}
           />
         )}
-        {screen === "products" && isAdmin && <ProductsScreen products={products} addProduct={addProduct} updateProduct={updateProduct} />}
-        {screen === "audit" && isAdmin && <AuditScreen audit={audit} />}
+        {screen === "products" && (
+          <ProductsScreen
+            products={products}
+            addProduct={addProduct}
+            updateProduct={updateProduct}
+            setRetired={setProductRetired}
+            canEdit={isAdmin}
+          />
+        )}
+        {screen === "audit" && isAdmin && <AuditScreen audit={audit} people={accounts} />}
         {screen === "account" && (
           <AccountScreen
             account={account}
             audit={audit}
+            people={accounts}
             rename={name => updatePerson(account.id, name, account.role)}
             changePin={pin => changePin(account.id, pin, true)}
             signOut={signOut}

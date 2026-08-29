@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, Check, Droplet, Minus, Plus, Search, Star, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Eyebrow } from "@/features/marketing/components/Eyebrow";
 import { packTypes } from "@/features/ledger/data/mock-data";
 import { money } from "@/lib/format";
@@ -24,7 +25,7 @@ export function NewEntryScreen(form: EntryForm) {
 
   // Only offer the type filter for types actually in the catalogue.
   const availableTypes = useMemo(
-    () => packTypes.filter(type => form.products.some(p => p.pack === type)),
+    () => packTypes.filter(type => form.products.some(p => p.pack === type && !p.retiredAt)),
     [form.products]
   );
 
@@ -49,6 +50,8 @@ export function NewEntryScreen(form: EntryForm) {
   const visible = useMemo(() => {
     const term = query.trim().toLowerCase();
     return form.products
+      // Retired products stay in the catalogue and on past sales, but cannot be sold again.
+      .filter(p => !p.retiredAt)
       .filter(p => packFilter === "All" || p.pack === packFilter)
       .filter(p => !term || p.name.toLowerCase().includes(term) || p.description.toLowerCase().includes(term))
       .sort((a, b) => {
@@ -214,6 +217,17 @@ export function NewEntryScreen(form: EntryForm) {
             <p className="mt-2.5 mb-0 text-sm2 text-subtle">
               {selected.pack}s of {selected.name} at {money(selected.price)} each
             </p>
+          </fieldset>
+
+          <fieldset className="m-0 border-0 p-0">
+            <legend className={legend}>Anything to note? (optional)</legend>
+            <Textarea
+              value={form.note}
+              onChange={e => form.setNote(e.target.value.slice(0, 300))}
+              rows={2}
+              placeholder="Who bought it, paid later, a damaged pack..."
+              className={cn(fieldInput, "min-h-20 resize-y")}
+            />
           </fieldset>
         </div>
 

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -52,7 +53,7 @@ type HistoryProps = {
   currentName: string;
   correctSale: (
     sale: Transaction,
-    next: { quantity: number; productId: string } | null
+    next: { quantity: number; productId: string; note: string } | null
   ) => Promise<string | null>;
 };
 
@@ -62,6 +63,7 @@ export function SalesHistoryScreen({ transactions, products, people, isAdmin, cu
   const [removing, setRemoving] = useState<Transaction | null>(null);
   const [draftQty, setDraftQty] = useState("1");
   const [draftProduct, setDraftProduct] = useState("");
+  const [draftNote, setDraftNote] = useState("");
   const [rowError, setRowError] = useState<string | null>(null);
   const [savingRow, setSavingRow] = useState(false);
 
@@ -76,10 +78,11 @@ export function SalesHistoryScreen({ transactions, products, people, isAdmin, cu
     setEditing(sale);
     setDraftQty(String(sale.quantity));
     setDraftProduct(sale.productId ?? products[0]?.id ?? "");
+    setDraftNote(sale.note ?? "");
     setRowError(null);
   }
 
-  async function submitRow(sale: Transaction, next: { quantity: number; productId: string } | null) {
+  async function submitRow(sale: Transaction, next: { quantity: number; productId: string; note: string } | null) {
     setSavingRow(true);
     const message = await correctSale(sale, next);
     setSavingRow(false);
@@ -292,11 +295,16 @@ export function SalesHistoryScreen({ transactions, products, people, isAdmin, cu
                         {formatDay(row.date)}
                         <span className="block text-sm2 text-faint">{row.time}</span>
                       </td>
-                      <td className={cn(td, "font-semibold")}>
+                      <td className={cn(td, "min-w-45 font-semibold")}>
                         {row.item}
                         {unsent.some(u => u.id === row.id) && (
                           <span className="ml-2 rounded-full bg-warn-soft px-2 py-0.5 text-xs2 whitespace-nowrap text-accent">
                             Not sent yet
+                          </span>
+                        )}
+                        {row.note && (
+                          <span className="mt-0.5 block text-sm2 leading-[1.45] font-normal wrap-anywhere text-subtle">
+                            {row.note}
                           </span>
                         )}
                       </td>
@@ -385,8 +393,8 @@ export function SalesHistoryScreen({ transactions, products, people, isAdmin, cu
           <AlertDialogHeader>
             <AlertDialogTitle className="font-serif text-2xl2 font-medium">Correct this sale</AlertDialogTitle>
             <AlertDialogDescription className="text-md2 text-subtle">
-              Recorded on {editing ? formatDay(editing.date) : ""}. Change the item or the
-              quantity; the price comes from the product.
+              Recorded on {editing ? formatDay(editing.date) : ""}. Change the item, the
+              quantity or the note; the price comes from the product.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -422,6 +430,19 @@ export function SalesHistoryScreen({ transactions, products, people, isAdmin, cu
                 className="h-auto rounded-[3px] border-field-line bg-field p-3.5 text-md2"
               />
             </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-note" className="text-xs2 font-bold tracking-[1.4px] text-subtle uppercase">
+                Note (optional)
+              </Label>
+              <Textarea
+                id="edit-note"
+                value={draftNote}
+                onChange={e => { setDraftNote(e.target.value.slice(0, 300)); setRowError(null); }}
+                rows={2}
+                placeholder="Who bought it, paid later, a damaged pack..."
+                className="h-auto min-h-16 resize-y rounded-[3px] border-field-line bg-field p-3.5 text-md2"
+              />
+            </div>
             <p className="m-0 text-sm2 text-subtle">
               New total: <strong className="font-serif text-md2 text-ink">{money(toNumber(draftQty) * draftUnitPrice)}</strong>
             </p>
@@ -434,7 +455,13 @@ export function SalesHistoryScreen({ transactions, products, people, isAdmin, cu
               disabled={savingRow || toNumber(draftQty) < 1}
               onClick={event => {
                 event.preventDefault();
-                if (editing) void submitRow(editing, { quantity: toNumber(draftQty), productId: draftProduct });
+                if (editing) {
+                  void submitRow(editing, {
+                    quantity: toNumber(draftQty),
+                    productId: draftProduct,
+                    note: draftNote.trim()
+                  });
+                }
               }}
               className="h-12 bg-accent text-md2 font-semibold text-on-accent hover:bg-accent-hover"
             >

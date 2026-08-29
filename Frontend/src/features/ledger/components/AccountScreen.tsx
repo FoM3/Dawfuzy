@@ -16,12 +16,13 @@ const fieldInput = "h-auto rounded-[3px] border-field-line bg-field p-3.5 text-m
 type Props = {
   account: Account;
   audit: AuditEntry[];
+  people: Account[];
   rename: (name: string) => Promise<string | null>;
   changePin: (pin: string) => Promise<string | null>;
   signOut: () => void;
 };
 
-export function AccountScreen({ account, audit, rename, changePin, signOut }: Props) {
+export function AccountScreen({ account, audit, people, rename, changePin, signOut }: Props) {
   const [name, setName] = useState(account.name);
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -150,7 +151,7 @@ export function AccountScreen({ account, audit, rename, changePin, signOut }: Pr
             <p className="m-0 mb-1.25 text-xs2 font-bold tracking-[1.4px] text-subtle">AUDIT LOG</p>
             <h3 className="m-0 font-serif text-2xl2 font-medium">Who changed what, and when</h3>
           </div>
-          <AuditScreen audit={audit} embedded />
+          <AuditScreen audit={audit} people={people} embedded />
         </section>
       )}
     </div>

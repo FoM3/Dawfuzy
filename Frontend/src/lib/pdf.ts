@@ -210,7 +210,10 @@ export async function downloadSalesReport(report: SalesReport) {
   const head = ["Date", "Item", "By", "Qty", "Unit", "Total", ...(report.isAdmin ? ["Profit"] : [])];
   const body = report.rows.map(row => [
     formatDay(row.date),
-    row.item,
+    // The note rides under the item rather than taking a column of its own, which would
+    // be empty on most rows and squeeze everything else.
+    row.note ? `${row.item}
+${row.note}` : row.item,
     row.recordedBy ?? "—",
     String(row.quantity),
     cash(row.unitPrice),

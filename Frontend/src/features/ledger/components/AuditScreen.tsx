@@ -1,20 +1,27 @@
 import { useState } from "react";
-import { Package, PencilLine, Trash2, UserCheck, UserMinus, UserPen, UserPlus, UserX } from "lucide-react";
+import { Archive, Package, PencilLine, RotateCcw, Trash2, UserCheck, UserMinus, UserPen, UserPlus, UserX } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Pagination } from "@/components/pagination";
 import { PAGE_SIZE, useAuditPage } from "@/features/ledger/data/queries";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { Eyebrow } from "@/features/marketing/components/Eyebrow";
-import { formatDay } from "@/lib/ledger";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { today } from "@/lib/format";
+import { formatDay, shiftDays, startOfMonth } from "@/lib/ledger";
 import { cn } from "@/lib/utils";
-import type { AuditAction, AuditEntry } from "@/features/ledger/types";
+import type { Account, AuditAction, AuditEntry } from "@/features/ledger/types";
 
 const th = "px-4 py-3 text-left text-xs2 font-bold tracking-[1.4px] text-subtle uppercase whitespace-nowrap";
+const filterLabel = "text-xs2 font-bold tracking-[1.4px] text-subtle uppercase";
+const filterField = "h-auto w-full rounded-[3px] border-field-line bg-field p-3 text-md2 text-ink";
 const td = "px-4 py-4 text-md2 align-middle";
 
 const look: Record<AuditAction, { label: string; Icon: typeof Package; tone: string }> = {
   "product.added": { label: "Added product", Icon: Package, tone: "bg-pos-soft text-pos" },
   "product.updated": { label: "Edited product", Icon: PencilLine, tone: "bg-info-soft text-info" },
+  "product.retired": { label: "Retired product", Icon: Archive, tone: "bg-neg-soft text-neg" },
+  "product.restored": { label: "Brought product back", Icon: RotateCcw, tone: "bg-pos-soft text-pos" },
   "person.added": { label: "Added person", Icon: UserPlus, tone: "bg-pos-soft text-pos" },
   "person.updated": { label: "Edited person", Icon: UserPen, tone: "bg-info-soft text-info" },
   "person.removed": { label: "Removed person", Icon: UserMinus, tone: "bg-neg-soft text-neg" },
@@ -24,16 +31,56 @@ const look: Record<AuditAction, { label: string; Icon: typeof Package; tone: str
   "sale.deleted": { label: "Removed sale", Icon: Trash2, tone: "bg-neg-soft text-neg" }
 };
 
+const ALL = "__all__";
+
+const periods = [
+  { key: "all", label: "Any time" },
+  { key: "today", label: "Today" },
+  { key: "week", label: "Last 7 days" },
+  { key: "month", label: "This month" }
+] as const;
+
+type Period = (typeof periods)[number]["key"];
+
+function boundsFor(period: Period) {
+  const now = today();
+  if (period === "today") return { from: now, to: now };
+  if (period === "week") return { from: shiftDays(now, -6), to: now };
+  if (period === "month") return { from: startOfMonth(now), to: now };
+  return { from: "", to: "" };
+}
+
+type Props = { audit: AuditEntry[]; people: Account[]; embedded?: boolean };
+
 // embedded drops the page heading so the account page can host it as one more card.
-export function AuditScreen({ audit, embedded = false }: { audit: AuditEntry[]; embedded?: boolean }) {
+export function AuditScreen({ audit, people, embedded = false }: Props) {
   const [page, setPage] = useState(0);
-  const query = useAuditPage(page, isSupabaseConfigured);
+  const [period, setPeriod] = useState<Period>("all");
+  const [action, setAction] = useState(ALL);
+  const [actor, setActor] = useState(ALL);
+
+  const { from, to } = boundsFor(period);
+  const filters = { from, to, action: action === ALL ? "" : action, actor: actor === ALL ? "" : actor };
+  const query = useAuditPage(page, isSupabaseConfigured, filters);
+
+  // Any change of filter restarts at the first page; staying on page 4 of a narrower
+  // result would show an empty table.
+  function change(apply: () => void) {
+    apply();
+    setPage(0);
+  }
 
   // Without a backend the trail lives in memory; it is append-only, so reversing gives
-  // newest first. With one, the server does the ordering and the paging.
-  const local = [...audit].reverse();
+  // newest first. With one, the server does the ordering, filtering and paging.
+  const local = [...audit]
+    .reverse()
+    .filter(e => (filters.from ? e.date >= filters.from : true))
+    .filter(e => (filters.to ? e.date <= filters.to : true))
+    .filter(e => (filters.action ? e.action === filters.action : true))
+    .filter(e => (filters.actor ? e.actorName === filters.actor : true));
   const trail = isSupabaseConfigured ? query.data?.rows ?? [] : local.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const total = isSupabaseConfigured ? query.data?.total ?? 0 : local.length;
+  const filtered = Boolean(filters.from || filters.action || filters.actor);
 
   return (
     <div
@@ -56,12 +103,56 @@ export function AuditScreen({ audit, embedded = false }: { audit: AuditEntry[]; 
       <Card className="gap-0 overflow-hidden rounded-none border-line bg-panel p-0 shadow-none">
         <div className="flex items-center justify-between gap-3 border-b border-line px-4.5 py-4 min-[431px]:px-6">
           <h3 className="m-0 font-serif text-2xl2 font-medium">Every change</h3>
-          <span className="text-xs2 whitespace-nowrap text-subtle">{total} events</span>
+          <span className="text-xs2 whitespace-nowrap text-subtle">
+            {total} {filtered ? "matching" : ""} events
+          </span>
+        </div>
+
+        <div className="grid gap-2.5 border-b border-line px-4.5 py-4 sm:grid-cols-3 min-[431px]:px-6">
+          <div className="grid gap-1.5">
+            <Label htmlFor="audit-period" className={filterLabel}>When</Label>
+            <Select value={period} onValueChange={v => change(() => setPeriod(v as Period))}>
+              <SelectTrigger id="audit-period" className={filterField}><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {periods.map(p => (
+                  <SelectItem key={p.key} value={p.key} className="text-md2">{p.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="audit-action" className={filterLabel}>Action</Label>
+            <Select value={action} onValueChange={v => change(() => setAction(v))}>
+              <SelectTrigger id="audit-action" className={filterField}><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL} className="text-md2">Everything</SelectItem>
+                {(Object.keys(look) as AuditAction[]).map(key => (
+                  <SelectItem key={key} value={key} className="text-md2">{look[key].label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="audit-actor" className={filterLabel}>By</Label>
+            <Select value={actor} onValueChange={v => change(() => setActor(v))}>
+              <SelectTrigger id="audit-actor" className={filterField}><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL} className="text-md2">Everyone</SelectItem>
+                {people.map(person => (
+                  <SelectItem key={person.id} value={person.name} className="text-md2">{person.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         {trail.length === 0 ? (
           <p className="m-0 px-4.5 py-12 text-center text-md2 text-subtle min-[431px]:px-6">
-            Nothing yet. Adding or editing a product or a person will show up here.
+            {filtered
+              ? "Nothing matches those filters."
+              : "Nothing yet. Adding or editing a product or a person will show up here."}
           </p>
         ) : (
           <div className="w-full min-w-0 overflow-x-auto">
