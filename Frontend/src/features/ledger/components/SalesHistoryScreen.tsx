@@ -93,7 +93,7 @@ export function SalesHistoryScreen({ transactions, products, people, isAdmin, cu
 
   // The same rule the server enforces, so the button is not offered where it would fail.
   const canCorrect = (sale: Transaction) =>
-    isAdmin || (sale.recordedById === currentId && sale.date === today());
+    unsent.some(u => u.id === sale.id) || isAdmin || (sale.recordedById === currentId && sale.date === today());
 
   const [exportOpen, setExportOpen] = useState(false);
   // Users get the ranges a shift needs; the wider ones, and the free date fields that
@@ -177,14 +177,16 @@ export function SalesHistoryScreen({ transactions, products, people, isAdmin, cu
             <em className="font-medium text-accent">on the record.</em>
           </h2>
         </div>
-        <Button
-          variant="outline"
-          onClick={() => setExportOpen(true)}
-          className="h-12 shrink-0 gap-2.5 border-line px-5 text-md2"
-        >
-          <FileDown className="size-4.5" aria-hidden="true" />
-          Export PDF
-        </Button>
+        {isAdmin && (
+          <Button
+            variant="outline"
+            onClick={() => setExportOpen(true)}
+            className="h-12 shrink-0 gap-2.5 border-line px-5 text-md2"
+          >
+            <FileDown className="size-4.5" aria-hidden="true" />
+            Export PDF
+          </Button>
+        )}
       </div>
 
       <Card className="mb-4 gap-0 rounded-none border-line bg-panel p-4.5 shadow-none min-[431px]:p-6">

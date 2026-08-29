@@ -17,7 +17,7 @@ import { clockTime, money, today, toNumber } from "@/lib/format";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { probeConnection } from "@/lib/connection";
 import { changeMyName, changeMyPin, createPerson, currentAccount, resetPinFor, setPersonActive, signInWithPin, signOutRemote, updatePersonDetails } from "@/features/ledger/data/auth";
-import { addPending, countPending, flushOutbox, pullPeople, pullProducts, pushAudit, pushProduct, readPending, type SyncState } from "@/lib/sync";
+import { addPending, countPending, dropPending, flushOutbox, pullPeople, pullProducts, pushAudit, pushProduct, readPending, type SyncState } from "@/lib/sync";
 import { deleteSale, updateSale, useSalesByProduct } from "@/features/ledger/data/queries";
 import { formatDay } from "@/lib/ledger";
 import { useKeyboardInset } from "@/lib/use-keyboard-inset";
@@ -282,6 +282,40 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
     sale: Transaction,
     next: { quantity: number; productId: string; note: string } | null
   ) {
+    // A sale still in the queue has no server row, so there is no RPC that could reach
+    // it and nothing to authorise. Fix it where it actually lives, which also means this
+    // keeps working with no signal, exactly when a queued sale is most likely to need it.
+    if (readPending().some(row => row.id === sale.id)) {
+      if (!next) {
+        dropPending([sale.id]);
+        setTransactions(current => current.filter(t => t.id !== sale.id));
+        setSync(countPending() ? "pending" : "synced");
+        toast.success("Sale removed");
+        return null;
+      }
+
+      const product = products.find(p => p.id === next.productId);
+      if (!product) return "No such product";
+      // Same rule the server applies: a new item takes the catalogue's prices, the same
+      // item keeps the ones captured when it was rung up.
+      const changedItem = next.productId !== sale.productId;
+      const unitPrice = changedItem ? product.price : sale.unitPrice;
+      const updated: Transaction = {
+        ...sale,
+        productId: product.id,
+        item: product.name,
+        quantity: next.quantity,
+        unitPrice,
+        costPrice: changedItem ? product.costPrice : sale.costPrice,
+        amount: next.quantity * unitPrice,
+        note: next.note || undefined
+      };
+      addPending(updated);
+      setTransactions(current => current.map(t => (t.id === sale.id ? updated : t)));
+      toast.success("Sale corrected");
+      return null;
+    }
+
     const message = next
       ? await updateSale(sale.id, next.quantity, next.productId, next.note)
       : await deleteSale(sale.id);
