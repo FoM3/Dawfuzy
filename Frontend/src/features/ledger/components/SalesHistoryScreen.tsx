@@ -39,6 +39,9 @@ function rangeFor(preset: DateRangePreset): { from: string; to: string } {
   return { from: "", to: "" };
 }
 
+// Sentinel for the "no filter" option: Radix Select cannot hold an empty string value.
+const EVERYONE = "__all__";
+
 const th = "px-3 py-3 text-left text-xs2 font-bold tracking-[1.4px] text-subtle uppercase whitespace-nowrap";
 const td = "px-3 py-3.5 text-md2 align-top";
 
@@ -51,13 +54,16 @@ type HistoryProps = {
   isAdmin: boolean;
   currentId: string;
   currentName: string;
+  // Queued sales the server keeps refusing, against why. Flagged on the row so takings
+  // that cannot go up are visible, not just a badge in the header.
+  stuck: Record<string, string>;
   correctSale: (
     sale: Transaction,
     next: { quantity: number; productId: string; note: string } | null
   ) => Promise<string | null>;
 };
 
-export function SalesHistoryScreen({ transactions, products, people, isAdmin, currentId, currentName, correctSale }: HistoryProps) {
+export function SalesHistoryScreen({ transactions, products, people, isAdmin, currentId, currentName, stuck, correctSale }: HistoryProps) {
   const canSeeProfit = isAdmin;
   const [editing, setEditing] = useState<Transaction | null>(null);
   const [removing, setRemoving] = useState<Transaction | null>(null);
@@ -104,6 +110,9 @@ export function SalesHistoryScreen({ transactions, products, people, isAdmin, cu
   const [from, setFrom] = useState(rangeFor("today").from);
   const [to, setTo] = useState(rangeFor("today").to);
   const [page, setPage] = useState(0);
+  // Admin-only: narrow the whole screen, totals included, to one person's entries.
+  const [person, setPerson] = useState(EVERYONE);
+  const by = isAdmin && person !== EVERYONE ? person : "";
 
   // Any change of range restarts at the first page; staying on page 5 of a range that
   // now has two pages would show an empty table.
@@ -115,8 +124,8 @@ export function SalesHistoryScreen({ transactions, products, people, isAdmin, cu
     setPage(0);
   }
 
-  const salesPage = useSalesPage(from, to, page, isAdmin);
-  const totalsQuery = useSalesTotals(from, to);
+  const salesPage = useSalesPage(from, to, page, isAdmin, by);
+  const totalsQuery = useSalesTotals(from, to, by);
 
   // Without a backend everything is in memory, so filter and slice it here instead.
   const localRows = useMemo(
@@ -124,8 +133,9 @@ export function SalesHistoryScreen({ transactions, products, people, isAdmin, cu
       transactions
         .filter(isSale)
         .filter(t => withinRange(t.date, from, to))
+        .filter(t => !by || t.recordedBy === by)
         .sort((a, b) => (a.date === b.date ? b.id.localeCompare(a.id) : b.date.localeCompare(a.date))),
-    [transactions, from, to]
+    [transactions, from, to, by]
   );
 
   // Sales that have not reached the server are not in any page it returns, so they are
@@ -136,6 +146,7 @@ export function SalesHistoryScreen({ transactions, products, people, isAdmin, cu
       isSupabaseConfigured
         ? readPending()
             .filter(t => withinRange(t.date, from, to))
+            .filter(t => !by || t.recordedBy === by)
             .sort((a, b) => b.id.localeCompare(a.id))
         : [],
     [from, to, transactions]
@@ -237,6 +248,27 @@ export function SalesHistoryScreen({ transactions, products, people, isAdmin, cu
             </div>
           </div>
         )}
+        {isAdmin && (
+          <div className="mt-3.5 grid gap-1.75 sm:max-w-61">
+            <Label htmlFor="sales-by" className="text-xs2 text-subtle">
+              Recorded by
+            </Label>
+            <Select value={person} onValueChange={value => { setPerson(value); setPage(0); }}>
+              <SelectTrigger
+                id="sales-by"
+                className="h-auto w-full rounded-[3px] border-field-line bg-field p-3 text-md2 text-ink"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={EVERYONE} className="text-md2">Everyone</SelectItem>
+                {people.map(one => (
+                  <SelectItem key={one.id} value={one.name} className="text-md2">{one.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </Card>
 
       <section className="mb-4 grid grid-cols-[repeat(auto-fit,minmax(var(--stat-min),1fr))] gap-2 min-[431px]:gap-3">
@@ -299,9 +331,23 @@ export function SalesHistoryScreen({ transactions, products, people, isAdmin, cu
                       </td>
                       <td className={cn(td, "min-w-45 font-semibold")}>
                         {row.item}
-                        {unsent.some(u => u.id === row.id) && (
-                          <span className="ml-2 rounded-full bg-warn-soft px-2 py-0.5 text-xs2 whitespace-nowrap text-accent">
-                            Not sent yet
+                        {stuck[row.id] ? (
+                          <span
+                            title={stuck[row.id]}
+                            className="ml-2 rounded-full bg-neg-soft px-2 py-0.5 text-xs2 whitespace-nowrap text-neg"
+                          >
+                            Refused by the server
+                          </span>
+                        ) : (
+                          unsent.some(u => u.id === row.id) && (
+                            <span className="ml-2 rounded-full bg-warn-soft px-2 py-0.5 text-xs2 whitespace-nowrap text-accent">
+                              Not sent yet
+                            </span>
+                          )
+                        )}
+                        {stuck[row.id] && (
+                          <span className="mt-0.5 block text-sm2 leading-[1.45] font-normal wrap-anywhere text-neg">
+                            {stuck[row.id]}
                           </span>
                         )}
                         {row.note && (

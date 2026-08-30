@@ -42,19 +42,28 @@ const toTransaction = (r: RemoteSale): Transaction => ({
 });
 
 // One page of sales for a date range, newest first.
-export function useSalesPage(from: string, to: string, page: number, isAdmin: boolean) {
+// Ordered by the day, then the time it was rung up. created_at is the tie-break only:
+// back-entered sales all share one arrival time, so on its own it scrambles their order.
+const SALES_ORDER = "sold_on.desc,sold_at.desc.nullslast,created_at.desc";
+const LEGACY_ORDER = "sold_on.desc,created_at.desc";
+
+export function useSalesPage(from: string, to: string, page: number, isAdmin: boolean, person = "") {
   return useQuery({
-    queryKey: ["sales", "page", { from, to, page, isAdmin }],
+    queryKey: ["sales", "page", { from, to, page, isAdmin, person }],
     enabled: isSupabaseConfigured,
     // Keeps the previous page on screen while the next loads, instead of flashing empty.
     placeholderData: previous => previous,
     queryFn: async () => {
-      const result = await fetchPage<RemoteSale>(
-        isAdmin ? "/sales" : "/sales_public",
-        { select: "*", order: "sold_on.desc,created_at.desc", ...rangeParams(from, to) },
-        page,
-        PAGE_SIZE
-      );
+      const params = {
+        select: "*",
+        ...rangeParams(from, to),
+        ...(person ? { recorded_by_name: `eq.${person}` } : {})
+      };
+      const table = isAdmin ? "/sales" : "/sales_public";
+      // sold_at arrives with a schema change. Until it has been run the column is unknown
+      // and PostgREST rejects the order outright, so fall back rather than blank the screen.
+      const result = await fetchPage<RemoteSale>(table, { ...params, order: SALES_ORDER }, page, PAGE_SIZE)
+        .catch(() => fetchPage<RemoteSale>(table, { ...params, order: LEGACY_ORDER }, page, PAGE_SIZE));
       return { rows: result.rows.map(toTransaction), total: result.total };
     }
   });
@@ -72,16 +81,18 @@ export async function fetchAllSales(
   const table = isAdmin ? "/sales" : "/sales_public";
   const params: Record<string, string> = {
     select: "*",
-    order: "sold_on.desc,created_at.desc",
     ...rangeParams(from, to),
     ...(filters.person ? { recorded_by_name: `eq.${filters.person}` } : {}),
     ...(filters.productId ? { product_id: `eq.${filters.productId}` } : {})
   };
   const chunk = 1000;
   const rows: Transaction[] = [];
+  // Same fallback as the paged query: sold_at only exists once the schema change is run.
+  let order = SALES_ORDER;
 
   for (let page = 0; ; page++) {
-    const result = await fetchPage<RemoteSale>(table, params, page, chunk);
+    const result = await fetchPage<RemoteSale>(table, { ...params, order }, page, chunk)
+      .catch(() => fetchPage<RemoteSale>(table, { ...params, order: (order = LEGACY_ORDER) }, page, chunk));
     rows.push(...result.rows.map(toTransaction));
     if (rows.length >= result.total || result.rows.length === 0) return rows;
   }
@@ -90,12 +101,19 @@ export async function fetchAllSales(
 type Totals = { revenue: number; profit: number; units: number; sale_count: number };
 
 // Totals across the whole range, not the loaded page.
-export function useSalesTotals(from: string, to: string) {
+// person selects the three-argument overload; PostgREST resolves by argument name, so the
+// unfiltered call still reaches the original two-argument function.
+export function useSalesTotals(from: string, to: string, person = "") {
   return useQuery({
-    queryKey: ["sales", "totals", { from, to }],
+    queryKey: ["sales", "totals", { from, to, person }],
     enabled: isSupabaseConfigured,
     queryFn: async () => {
-      const rows = await callRpc<Totals[]>("sales_totals", bounds(from, to));
+      // Same reason as the ordering above: the person-filtered overload arrives with a
+      // schema change, and until it is run the unfiltered totals are the honest answer.
+      const rows = person
+        ? await callRpc<Totals[]>("sales_totals", { ...bounds(from, to), person })
+            .catch(() => callRpc<Totals[]>("sales_totals", bounds(from, to)))
+        : await callRpc<Totals[]>("sales_totals", bounds(from, to));
       const t = rows[0];
       return {
         revenue: Number(t?.revenue ?? 0),

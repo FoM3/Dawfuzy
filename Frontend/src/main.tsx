@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { registerSW } from "virtual:pwa-register";
 import { THEME_KEY } from "@/lib/use-theme";
-import { PENDING_KEY } from "@/lib/sync";
+import { FAILURE_KEY, PENDING_KEY } from "@/lib/sync";
 import App from "./App";
 import "./styles.css";
 
@@ -20,9 +20,10 @@ const queryClient = new QueryClient({
 });
 
 // Earlier versions cached the whole ledger here, staff PINs included. Clear what they left
-// behind. Two keys survive on purpose: the theme, which says nothing about the shop, and
-// unsent sales, which exist nowhere else until they reach the server.
-const keep = [THEME_KEY, PENDING_KEY];
+// behind. Three keys survive on purpose: the theme, which says nothing about the shop, and
+// unsent sales with the record of why they are stuck, which exist nowhere else until they
+// reach the server.
+const keep = [THEME_KEY, PENDING_KEY, FAILURE_KEY];
 try {
   for (const key of Object.keys(localStorage)) {
     if (key.startsWith("dawfuzy-") && !keep.includes(key)) localStorage.removeItem(key);

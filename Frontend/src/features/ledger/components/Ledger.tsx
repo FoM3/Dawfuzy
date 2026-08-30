@@ -17,7 +17,7 @@ import { clockTime, money, today, toNumber } from "@/lib/format";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { probeConnection } from "@/lib/connection";
 import { changeMyName, changeMyPin, createPerson, currentAccount, resetPinFor, setPersonActive, signInWithPin, signOutRemote, updatePersonDetails } from "@/features/ledger/data/auth";
-import { addPending, countPending, dropPending, flushOutbox, pullPeople, pullProducts, pushAudit, pushProduct, readPending, syncFailureReason, type SyncState } from "@/lib/sync";
+import { addPending, clearFailures, countPending, dropPending, flushOutbox, pullPeople, pullProducts, pushAudit, pushProduct, readPending, setAsideReasons, syncFailureReason, type SyncState } from "@/lib/sync";
 import { deleteSale, updateSale, useSalesByProduct } from "@/features/ledger/data/queries";
 import { formatDay } from "@/lib/ledger";
 import { useKeyboardInset } from "@/lib/use-keyboard-inset";
@@ -45,6 +45,9 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
   const [restoringSession, setRestoringSession] = useState(isSupabaseConfigured);
   const [sync, setSync] = useState<SyncState>(isSupabaseConfigured ? "pending" : "local");
   const [syncError, setSyncError] = useState<string | null>(null);
+  // Sales the server keeps refusing. Held on the device and shown in history, so takings
+  // that cannot go up are visible rather than silently stuck behind a spinning badge.
+  const [stuck, setStuck] = useState<Record<string, string>>(() => setAsideReasons());
 
   const account = accounts.find(a => a.id === sessionId) ?? null;
   const isAdmin = account ? isAdminRole(account.role) : false;
@@ -166,25 +169,32 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
     }
   }
 
-  async function flush() {
+  // A tap on the badge means "try again now", so a sale set aside as hopeless gets a fresh
+  // run of attempts: whatever was wrong may well have been fixed since.
+  async function flush(retrySetAside = false) {
     if (!supabase) return;
+    if (retrySetAside) clearFailures();
     if (!navigator.onLine) { setSync("offline"); return; }
     try {
-      const { sent, sentIds, waiting, blocked } = await flushOutbox(supabase);
+      const { sent, sentIds, waiting, blocked, setAside } = await flushOutbox(supabase);
       if (sent) {
         // Rows reached the server, so every rollup and page built from them is stale, and
         // the local copies can go: history reads them back from the server now.
         void queryClient.invalidateQueries({ queryKey: ["sales"] });
         setTransactions(current => current.filter(t => !sentIds.includes(t.id)));
       }
-      // blocked rows belong to somebody else and can only go up under their session, so
-      // they are named rather than left as a badge nobody can clear.
+      const refused = setAsideReasons();
+      setStuck(refused);
+      // A sale the server keeps refusing, and one belonging to somebody else, both need
+      // saying out loud: neither clears on its own, and neither is the app still trying.
       setSyncError(
-        blocked > 0
-          ? `${blocked} ${blocked === 1 ? "sale" : "sales"} recorded by someone else. They send when that person signs in here.`
-          : null
+        setAside > 0
+          ? `${setAside} ${setAside === 1 ? "sale is" : "sales are"} being refused: ${Object.values(refused)[0] ?? "unknown"}`
+          : blocked > 0
+            ? `${blocked} ${blocked === 1 ? "sale" : "sales"} recorded by someone else. They send when that person signs in here.`
+            : null
       );
-      setSync(waiting > 0 ? "pending" : "synced");
+      setSync(setAside > 0 ? "error" : waiting > 0 ? "pending" : "synced");
     } catch (error) {
       setSyncError(syncFailureReason(error));
       setSync("error");
@@ -311,6 +321,7 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
       if (!next) {
         dropPending([sale.id]);
         setTransactions(current => current.filter(t => t.id !== sale.id));
+        setStuck(setAsideReasons());
         setSync(countPending() ? "pending" : "synced");
         toast.success("Sale removed");
         return null;
@@ -537,7 +548,7 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
           account={account}
           sync={sync}
           syncError={syncError}
-          retrySync={() => void flush()}
+          retrySync={() => void flush(true)}
           editAccount={() => setScreen("account")}
         />
         {screen === "overview" && isAdmin && (
@@ -573,6 +584,7 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
             isAdmin={isAdmin}
             currentId={account.id}
             currentName={account.name}
+            stuck={stuck}
             correctSale={correctSale}
           />
         )}

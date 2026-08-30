@@ -27,8 +27,64 @@ const writePending = (sales: Transaction[]) => {
 };
 
 export const addPending = (sale: Transaction) => writePending([...readPending().filter(s => s.id !== sale.id), sale]);
-export const dropPending = (ids: string[]) => writePending(readPending().filter(s => !ids.includes(s.id)));
+export const dropPending = (ids: string[]) => {
+  writePending(readPending().filter(s => !ids.includes(s.id)));
+  dropFailures(ids);
+};
 export const countPending = () => readPending().length;
+
+// Why a queued sale is not going up, kept beside the outbox rather than on the sale itself,
+// so a row that eventually sends carries no trace of having struggled.
+export const FAILURE_KEY = "dawfuzy-unsent-failures-v1";
+
+// After this many rejections a sale is set aside rather than retried every 20 seconds
+// forever. It is never discarded: it is takings that exist nowhere else.
+const GIVE_UP_AFTER = 3;
+
+export type SaleFailure = { attempts: number; reason: string };
+
+export const readFailures = (): Record<string, SaleFailure> => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(FAILURE_KEY) ?? "{}");
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, SaleFailure>) : {};
+  } catch {
+    return {};
+  }
+};
+
+const writeFailures = (failures: Record<string, SaleFailure>) => {
+  try {
+    if (Object.keys(failures).length === 0) localStorage.removeItem(FAILURE_KEY);
+    else localStorage.setItem(FAILURE_KEY, JSON.stringify(failures));
+  } catch {
+    // Storage full or blocked. The sale itself is what matters, and that is already written.
+  }
+};
+
+// A sale is set aside once it has been rejected enough times to look permanent.
+export const isSetAside = (failure?: SaleFailure) => (failure?.attempts ?? 0) >= GIVE_UP_AFTER;
+
+// Set-aside sale ids against why, for the badge and for the row in history.
+export const setAsideReasons = (): Record<string, string> => {
+  const failures = readFailures();
+  const reasons: Record<string, string> = {};
+  for (const sale of readPending()) {
+    if (isSetAside(failures[sale.id])) reasons[sale.id] = failures[sale.id].reason;
+  }
+  return reasons;
+};
+
+// Tapping the badge means "I have fixed whatever it was": wipe the tally so every set-aside
+// sale gets a fresh run of attempts.
+export const clearFailures = () => writeFailures({});
+
+// A sale that left the outbox, sent or deleted, has nothing left to explain.
+function dropFailures(ids: string[]) {
+  const failures = readFailures();
+  if (!ids.some(id => id in failures)) return;
+  for (const id of ids) delete failures[id];
+  writeFailures(failures);
+}
 
 // A PostgrestError is a plain object, so String() on it gives "[object Object]" and the
 // badge would report nothing useful. Read its own fields first.
@@ -147,7 +203,7 @@ const DUPLICATE_KEY = "23505";
 // under this session, so counting it would leave the badge stuck on "Syncing" for a
 // person with nothing to send and no way to clear it.
 export async function flushOutbox(client: SupabaseClient) {
-  const idle = { sent: 0, sentIds: [] as string[], waiting: 0, blocked: 0 };
+  const idle = { sent: 0, sentIds: [] as string[], waiting: 0, blocked: 0, setAside: 0 };
   const pending = readPending();
   if (pending.length === 0) return idle;
 
@@ -161,22 +217,46 @@ export async function flushOutbox(client: SupabaseClient) {
   const blocked = pending.length - mine.length;
   if (mine.length === 0) return { ...idle, blocked };
 
-  const rows = mine.map(sale => toRemoteSale(sale, userId));
-  const { error } = await client.from("sales").insert(rows);
-  // A batch is one statement, so a single id already on the server rolls the whole thing
-  // back. Retry one at a time and let the duplicates count as delivered.
-  if (error && error.code !== DUPLICATE_KEY) throw error;
-  if (error) {
-    for (const row of rows) {
-      const { error: one } = await client.from("sales").insert(row);
-      if (one && one.code !== DUPLICATE_KEY) throw one;
+  const failures = readFailures();
+  // Set-aside sales are held back so one that can never go does not keep every sale behind
+  // it from going. They are still on the device, and the badge still names them.
+  const sending = mine.filter(sale => !isSetAside(failures[sale.id]));
+  const setAside = mine.length - sending.length;
+  if (sending.length === 0) return { ...idle, blocked, setAside };
+
+  const sentIds: string[] = [];
+  const { error } = await client.from("sales").insert(sending.map(sale => toRemoteSale(sale, userId)));
+  if (!error) {
+    sentIds.push(...sending.map(sale => sale.id));
+  } else {
+    // A batch is one statement, so a single rejected row rolls the whole thing back. Send
+    // them one at a time to find out which, and let the good ones through regardless.
+    for (const sale of sending) {
+      const { error: one } = await client.from("sales").insert(toRemoteSale(sale, userId));
+      // Already on the server: the response to an earlier attempt was simply lost.
+      if (!one || one.code === DUPLICATE_KEY) {
+        sentIds.push(sale.id);
+        delete failures[sale.id];
+        continue;
+      }
+      failures[sale.id] = {
+        attempts: (failures[sale.id]?.attempts ?? 0) + 1,
+        reason: syncFailureReason(one)
+      };
     }
   }
 
   // Only now, once the server has them.
-  const sentIds = mine.map(sale => sale.id);
   dropPending(sentIds);
-  return { sent: mine.length, sentIds, waiting: readPending().filter(isMine).length, blocked };
+  writeFailures(failures);
+  const left = readPending().filter(isMine);
+  return {
+    sent: sentIds.length,
+    sentIds,
+    waiting: left.filter(sale => !isSetAside(failures[sale.id])).length,
+    blocked,
+    setAside: left.filter(sale => isSetAside(failures[sale.id])).length
+  };
 }
 
 export async function pushProduct(client: SupabaseClient, product: Product) {
