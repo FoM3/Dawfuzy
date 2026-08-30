@@ -136,6 +136,11 @@ export async function pullPeople(client: SupabaseClient, isAdmin = false): Promi
 }
 
 // Push
+// Plain inserts, never an upsert. PostgREST turns an upsert into INSERT ... ON CONFLICT DO
+// UPDATE, and Postgres then checks the table's UPDATE policy; sales has none by design, so
+// every queued sale was rejected with 42501 whether or not it had already landed.
+const DUPLICATE_KEY = "23505";
+
 // Sends the signed-in person's unsent sales; device-generated ids make a retry idempotent.
 // Only their own go: recorded_by must equal auth.uid(), so another's would be miscredited.
 // waiting counts only the caller's own rows. Somebody else's queued sale cannot be sent
@@ -156,10 +161,17 @@ export async function flushOutbox(client: SupabaseClient) {
   const blocked = pending.length - mine.length;
   if (mine.length === 0) return { ...idle, blocked };
 
-  const { error } = await client
-    .from("sales")
-    .upsert(mine.map(sale => toRemoteSale(sale, userId)), { onConflict: "id", ignoreDuplicates: false });
-  if (error) throw error;
+  const rows = mine.map(sale => toRemoteSale(sale, userId));
+  const { error } = await client.from("sales").insert(rows);
+  // A batch is one statement, so a single id already on the server rolls the whole thing
+  // back. Retry one at a time and let the duplicates count as delivered.
+  if (error && error.code !== DUPLICATE_KEY) throw error;
+  if (error) {
+    for (const row of rows) {
+      const { error: one } = await client.from("sales").insert(row);
+      if (one && one.code !== DUPLICATE_KEY) throw one;
+    }
+  }
 
   // Only now, once the server has them.
   const sentIds = mine.map(sale => sale.id);
