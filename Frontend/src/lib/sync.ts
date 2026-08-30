@@ -127,16 +127,23 @@ export async function pullPeople(client: SupabaseClient, isAdmin = false): Promi
 // Push
 // Sends the signed-in person's unsent sales; device-generated ids make a retry idempotent.
 // Only their own go: recorded_by must equal auth.uid(), so another's would be miscredited.
+// waiting counts only the caller's own rows. Somebody else's queued sale cannot be sent
+// under this session, so counting it would leave the badge stuck on "Syncing" for a
+// person with nothing to send and no way to clear it.
 export async function flushOutbox(client: SupabaseClient) {
+  const idle = { sent: 0, sentIds: [] as string[], waiting: 0, blocked: 0 };
   const pending = readPending();
-  if (pending.length === 0) return { sent: 0, sentIds: [] as string[], waiting: 0 };
+  if (pending.length === 0) return idle;
 
   const { data: auth } = await client.auth.getUser();
   const userId = auth.user?.id ?? null;
-  if (!userId) return { sent: 0, sentIds: [] as string[], waiting: pending.length };
+  // No session yet: still count them, so a retry runs once one is restored.
+  if (!userId) return { ...idle, waiting: pending.length };
 
-  const mine = pending.filter(sale => (sale.recordedById ?? userId) === userId);
-  if (mine.length === 0) return { sent: 0, sentIds: [] as string[], waiting: pending.length };
+  const isMine = (sale: Transaction) => (sale.recordedById ?? userId) === userId;
+  const mine = pending.filter(isMine);
+  const blocked = pending.length - mine.length;
+  if (mine.length === 0) return { ...idle, blocked };
 
   const { error } = await client
     .from("sales")
@@ -146,7 +153,7 @@ export async function flushOutbox(client: SupabaseClient) {
   // Only now, once the server has them.
   const sentIds = mine.map(sale => sale.id);
   dropPending(sentIds);
-  return { sent: mine.length, sentIds, waiting: readPending().length };
+  return { sent: mine.length, sentIds, waiting: readPending().filter(isMine).length, blocked };
 }
 
 export async function pushProduct(client: SupabaseClient, product: Product) {

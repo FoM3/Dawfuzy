@@ -104,6 +104,19 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transactions, sessionId]);
 
+  // navigator.onLine reports a connected wifi with no internet as online, so a failed
+  // flush cannot wait for an "online" event that may never fire. Retry on a timer, and
+  // whenever the tab comes back, which is how a phone actually returns to the app.
+  useEffect(() => {
+    if (!supabase) return;
+    if (sync !== "pending" && sync !== "error") return;
+    const timer = setInterval(() => void flush(), 20_000);
+    const onVisible = () => { if (document.visibilityState === "visible") void flush(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sync]);
+
   // A user landing on an admin screen (bookmark, shared link, demotion) is sent somewhere they may go.
   useEffect(() => {
     if (account && !isAdminRole(account.role) && !userScreens.includes(screen)) setScreen("entry");
