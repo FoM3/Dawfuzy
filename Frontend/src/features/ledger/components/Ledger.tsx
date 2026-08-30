@@ -17,7 +17,7 @@ import { clockTime, money, today, toNumber } from "@/lib/format";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { probeConnection } from "@/lib/connection";
 import { changeMyName, changeMyPin, createPerson, currentAccount, resetPinFor, setPersonActive, signInWithPin, signOutRemote, updatePersonDetails } from "@/features/ledger/data/auth";
-import { addPending, countPending, dropPending, flushOutbox, pullPeople, pullProducts, pushAudit, pushProduct, readPending, type SyncState } from "@/lib/sync";
+import { addPending, countPending, dropPending, flushOutbox, pullPeople, pullProducts, pushAudit, pushProduct, readPending, syncFailureReason, type SyncState } from "@/lib/sync";
 import { deleteSale, updateSale, useSalesByProduct } from "@/features/ledger/data/queries";
 import { formatDay } from "@/lib/ledger";
 import { useKeyboardInset } from "@/lib/use-keyboard-inset";
@@ -44,6 +44,7 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [restoringSession, setRestoringSession] = useState(isSupabaseConfigured);
   const [sync, setSync] = useState<SyncState>(isSupabaseConfigured ? "pending" : "local");
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const account = accounts.find(a => a.id === sessionId) ?? null;
   const isAdmin = account ? isAdminRole(account.role) : false;
@@ -121,10 +122,10 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
   useEffect(() => {
     if (account && !isAdminRole(account.role) && !userScreens.includes(screen)) setScreen("entry");
   }, [account, screen, setScreen]);
-  const [productId, setProductId] = useState(products[0].id);
+  const [productId, setProductId] = useState<string | null>(null);
   const [quantity, setQuantity] = useState("1");
   const [note, setNote] = useState("");
-  const selected = products.find(product => product.id === productId) ?? products[0];
+  const selected = products.find(product => product.id === productId) ?? null;
 
   const quantityValue = toNumber(quantity);
 
@@ -169,15 +170,23 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
     if (!supabase) return;
     if (!navigator.onLine) { setSync("offline"); return; }
     try {
-      const { sent, sentIds, waiting } = await flushOutbox(supabase);
+      const { sent, sentIds, waiting, blocked } = await flushOutbox(supabase);
       if (sent) {
         // Rows reached the server, so every rollup and page built from them is stale, and
         // the local copies can go: history reads them back from the server now.
         void queryClient.invalidateQueries({ queryKey: ["sales"] });
         setTransactions(current => current.filter(t => !sentIds.includes(t.id)));
       }
+      // blocked rows belong to somebody else and can only go up under their session, so
+      // they are named rather than left as a badge nobody can clear.
+      setSyncError(
+        blocked > 0
+          ? `${blocked} ${blocked === 1 ? "sale" : "sales"} recorded by someone else. They send when that person signs in here.`
+          : null
+      );
       setSync(waiting > 0 ? "pending" : "synced");
-    } catch {
+    } catch (error) {
+      setSyncError(syncFailureReason(error));
       setSync("error");
     }
   }
@@ -407,6 +416,7 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
 
   function submit(event: FormEvent) {
     event.preventDefault();
+    if (!selected) return toast.error("Pick which water was sold");
     if (quantityValue < 1) return toast.error("Enter a quantity of at least 1");
 
     // Snapshot both prices so a later product edit cannot rewrite this sale's profit.
@@ -426,6 +436,7 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
       recordedBy: account?.name
     };
     setTransactions([...transactions, entry]);
+    setProductId(null);
     setQuantity("1");
     setNote("");
     if (supabase) {
@@ -521,7 +532,14 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
     <div className="grid min-h-dvh bg-app lg:grid-cols-[230px_1fr]">
       <LedgerSidebar screen={screen} setScreen={setScreen} role={account.role} />
       <main className="min-w-0">
-        <LedgerHeader screen={screen} account={account} sync={sync} editAccount={() => setScreen("account")} />
+        <LedgerHeader
+          screen={screen}
+          account={account}
+          sync={sync}
+          syncError={syncError}
+          retrySync={() => void flush()}
+          editAccount={() => setScreen("account")}
+        />
         {screen === "overview" && isAdmin && (
           <OverviewScreen
             transactions={transactions}

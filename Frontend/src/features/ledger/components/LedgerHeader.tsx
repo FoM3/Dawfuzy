@@ -15,9 +15,16 @@ const titles: Record<LedgerScreen, string> = {
   account: "Account"
 };
 
-type HeaderProps = { screen: LedgerScreen; account: Account; sync: SyncState; editAccount: () => void };
+type HeaderProps = {
+  screen: LedgerScreen;
+  account: Account;
+  sync: SyncState;
+  syncError: string | null;
+  retrySync: () => void;
+  editAccount: () => void;
+};
 
-export function LedgerHeader({ screen, account, sync, editAccount }: HeaderProps) {
+export function LedgerHeader({ screen, account, sync, syncError, retrySync, editAccount }: HeaderProps) {
   const isAdmin = isAdminRole(account.role);
   return (
     <header className="sticky top-0 z-4 flex h-18.75 items-center justify-between gap-3 border-b border-line bg-header-bg/85 px-[clamp(16px,4vw,55px)] backdrop-blur-md sm:gap-4 md:h-22.5">
@@ -30,7 +37,7 @@ export function LedgerHeader({ screen, account, sync, editAccount }: HeaderProps
         <h2 className="m-0 truncate font-serif text-display-sm font-medium tracking-[-.5px]">{titles[screen]}</h2>
       </div>
       <div className="flex shrink-0 items-center gap-2 sm:gap-4">
-        <SyncIcon sync={sync} className="size-9 sm:size-10" />
+        <SyncIcon sync={sync} reason={syncError} retry={retrySync} className="size-9 sm:size-10" />
         <ThemeToggle className="size-9 sm:size-10" />
         <button
           type="button"

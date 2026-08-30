@@ -30,6 +30,17 @@ export const addPending = (sale: Transaction) => writePending([...readPending().
 export const dropPending = (ids: string[]) => writePending(readPending().filter(s => !ids.includes(s.id)));
 export const countPending = () => readPending().length;
 
+// A PostgrestError is a plain object, so String() on it gives "[object Object]" and the
+// badge would report nothing useful. Read its own fields first.
+export function syncFailureReason(error: unknown): string {
+  if (error && typeof error === "object") {
+    const e = error as { message?: string; details?: string; hint?: string; code?: string };
+    const text = e.message || e.details || e.hint;
+    if (text) return e.code ? `${text} (${e.code})` : text;
+  }
+  return String(error);
+}
+
 // Mapping
 const toRemoteSale = (t: Transaction, recordedBy: string | null) => ({
   id: t.id,

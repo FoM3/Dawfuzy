@@ -17,8 +17,8 @@ const SCROLL_AFTER = 8;
 
 export function NewEntryScreen(form: EntryForm) {
   const { selected, quantityValue } = form;
-  const total = selected.price * quantityValue;
-  const profit = (selected.price - selected.costPrice) * quantityValue;
+  const total = (selected?.price ?? 0) * quantityValue;
+  const profit = ((selected?.price ?? 0) - (selected?.costPrice ?? 0)) * quantityValue;
   const step = (by: number) => form.setQuantity(String(Math.max(1, quantityValue + by)));
 
   const [query, setQuery] = useState("");
@@ -215,7 +215,9 @@ export function NewEntryScreen(form: EntryForm) {
               </button>
             </div>
             <p className="mt-2.5 mb-0 text-sm2 text-subtle">
-              {selected.pack}s of {selected.name} at {money(selected.price)} each
+              {selected
+                ? `${selected.pack}s of ${selected.name} at ${money(selected.price)} each`
+                : "Pick a water above to see the price."}
             </p>
           </fieldset>
 
@@ -233,7 +235,9 @@ export function NewEntryScreen(form: EntryForm) {
 
         <aside className="min-w-0 bg-deep p-4.5 text-white min-[431px]:p-6.5 lg:sticky lg:top-26.5">
           <p className="m-0 mb-1.5 text-xs2 font-bold tracking-[1.4px] text-on-deep-label">SUMMARY</p>
-          <h3 className="m-0 mb-5 font-serif text-2xl2 leading-[1.2] font-medium">{selected.name}</h3>
+          <h3 className={cn("m-0 mb-5 font-serif text-2xl2 leading-[1.2] font-medium", !selected && "text-on-deep-subtle")}>
+            {selected ? selected.name : "Nothing picked yet"}
+          </h3>
 
           <dl className="m-0 border-t border-white/15">
             <div className="flex justify-between gap-3 border-b border-white/10 py-2.5">
@@ -253,7 +257,11 @@ export function NewEntryScreen(form: EntryForm) {
             <strong className="font-serif text-3xl2">{money(total)}</strong>
           </div>
 
-          <Button type="submit" className="h-12 w-full gap-2.5 bg-accent px-5 text-md2 font-semibold text-on-accent hover:bg-accent-hover">
+          <Button
+            type="submit"
+            disabled={!selected}
+            className="h-12 w-full gap-2.5 bg-accent px-5 text-md2 font-semibold text-on-accent hover:bg-accent-hover"
+          >
             Save sale
             <ArrowRight className="size-4.5" aria-hidden="true" />
           </Button>

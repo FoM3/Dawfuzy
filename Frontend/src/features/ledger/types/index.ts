@@ -100,8 +100,10 @@ export type DateRangePreset = "today" | "yesterday" | "week" | "month" | "all" |
 
 export type EntryForm = {
   products: Product[];
-  selected: Product;
-  productId: string;
+  // Null until a water is picked, and again after each save, so two sales in a row cannot
+  // be rung up against a product left over from the last one.
+  selected: Product | null;
+  productId: string | null;
   selectProduct: (id: string) => void;
   quantity: string;
   setQuantity: (value: string) => void;
