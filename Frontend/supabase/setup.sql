@@ -214,6 +214,33 @@ $$;
 drop trigger if exists sales_sold_at on public.sales;
 create trigger sales_sold_at before insert on public.sales
   for each row execute function public.sales_set_sold_at();
+
+-- Staff read the catalogue through products_public, which carries no cost, so their device
+-- has none to send and posts zero. Stamped from the catalogue here, which keeps cost off
+-- the staff device while still recording it. A zero cost is never meaningful to this shop.
+create or replace function public.sales_set_cost()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if coalesce(new.cost_price, 0) = 0 and new.product_id is not null then
+    new.cost_price := coalesce((select p.cost_price from public.products p where p.id = new.product_id), 0);
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists sales_cost on public.sales;
+create trigger sales_cost before insert on public.sales
+  for each row execute function public.sales_set_cost();
+
+-- Sales recorded before that trigger existed have no cost, so they report their whole
+-- value as profit. Fill them from the catalogue.
+update public.sales s
+   set cost_price = p.cost_price
+  from public.products p
+ where p.id = s.product_id and coalesce(s.cost_price, 0) = 0;
 -- History can be narrowed to one person, so the name is worth an index of its own.
 create index if not exists sales_recorded_by_name_idx on public.sales (recorded_by_name);
 

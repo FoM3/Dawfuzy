@@ -104,6 +104,7 @@ const toRemoteSale = (t: Transaction, recordedBy: string | null) => ({
   item: t.item,
   quantity: t.quantity,
   unit_price: t.unitPrice,
+  // 0 from a staff device: the server fills it from the catalogue.
   cost_price: t.costPrice,
   amount: t.amount,
   sold_on: t.date,
@@ -146,6 +147,8 @@ const fromRemoteProduct = (r: RemoteProduct): Product => ({
   name: r.name,
   description: r.description ?? "",
   pack: r.pack as Product["pack"],
+  // Staff read products_public, which has no cost. 0 here, and the server stamps the real
+  // one on insert, so a sale is costed without cost ever reaching a staff device.
   costPrice: Number(r.cost_price ?? 0),
   price: Number(r.price),
   retiredAt: r.retired_at ?? null,
