@@ -85,6 +85,16 @@ export function ExportSheet({ open, setOpen, kind, isAdmin, accountName, product
 
   const { from, to } = boundsFor(period, customFrom, customTo);
   const invalid = period === "custom" && customFrom && customTo && customFrom > customTo;
+  // The detailed report is the breakdowns by person and by product. Narrowing to one of
+  // either leaves those pages with a single row, so the choice is not offered.
+  const wholeShop = kind === "sales" && detail === "detailed";
+
+  function chooseDetail(value: "simple" | "detailed") {
+    setDetail(value);
+    if (value !== "detailed") return;
+    setPerson(ALL);
+    setProductId(ALL);
+  }
 
   async function run() {
     setBusy(true);
@@ -213,7 +223,7 @@ export function ExportSheet({ open, setOpen, kind, isAdmin, accountName, product
           {kind === "sales" && (
             <div className="grid gap-1.5">
               <Label htmlFor="export-detail" className={fieldLabel}>How much detail</Label>
-              <Select value={detail} onValueChange={value => setDetail(value as "simple" | "detailed")}>
+              <Select value={detail} onValueChange={value => chooseDetail(value as "simple" | "detailed")}>
                 <SelectTrigger id="export-detail" className={cn(fieldInput, "w-full")}>
                   <SelectValue />
                 </SelectTrigger>
@@ -224,8 +234,8 @@ export function ExportSheet({ open, setOpen, kind, isAdmin, accountName, product
               </Select>
               <p className="m-0 text-sm2 leading-[1.45] text-subtle">
                 {detail === "detailed"
-                  ? "Adds a revenue breakdown, a profit breakdown, the time of every sale, and a subtotal for each day."
-                  : "The headline figures, the chart, and every sale in one list."}
+                  ? "Adds a revenue breakdown, a profit breakdown, the time of every sale, and a subtotal for each day. Covers the whole shop."
+                  : "The headline figures, the chart, and every sale, split by day."}
               </p>
             </div>
           )}
@@ -245,7 +255,7 @@ export function ExportSheet({ open, setOpen, kind, isAdmin, accountName, product
             </div>
           )}
 
-          {isAdmin && (
+          {isAdmin && !wholeShop && (
             <div className="mt-5 grid gap-2">
               <Label htmlFor="export-person" className={fieldLabel}>Recorded by</Label>
               <Select value={person} onValueChange={setPerson}>
@@ -262,6 +272,7 @@ export function ExportSheet({ open, setOpen, kind, isAdmin, accountName, product
             </div>
           )}
 
+          {!wholeShop && (
           <div className="mt-5 grid gap-2">
             <Label htmlFor="export-product" className={fieldLabel}>Product</Label>
             <Select value={productId} onValueChange={setProductId}>
@@ -278,6 +289,7 @@ export function ExportSheet({ open, setOpen, kind, isAdmin, accountName, product
               </SelectContent>
             </Select>
           </div>
+          )}
 
           {invalid && <p className="m-0 mt-4 text-sm2 text-neg">The start date is after the end date.</p>}
         </div>
