@@ -78,6 +78,8 @@ export function ExportSheet({ open, setOpen, kind, isAdmin, accountName, product
   const [customFrom, setCustomFrom] = useState(startOfMonth(today()));
   const [customTo, setCustomTo] = useState(today());
   const [person, setPerson] = useState(ALL);
+  // Simple is one flat list. Detailed splits the range into days and adds the breakdowns.
+  const [detail, setDetail] = useState<"simple" | "detailed">("simple");
   const [productId, setProductId] = useState(ALL);
   const [busy, setBusy] = useState(false);
 
@@ -123,7 +125,9 @@ export function ExportSheet({ open, setOpen, kind, isAdmin, accountName, product
       ].filter(Boolean) as string[];
 
       if (kind === "sales") {
-        await pdf.downloadSalesReport({ rows, totals, from, to, isAdmin, by: accountName, scope });
+        const report = { rows, totals, from, to, isAdmin, by: accountName, scope, products };
+        if (detail === "detailed") await pdf.downloadDetailedSalesReport(report);
+        else await pdf.downloadSimpleSalesReport(report);
       } else {
         // Prices come from the sales, never the catalogue: each carries what it was actually
         // charged at, so a later price change cannot rewrite an old report. Both ends are kept
@@ -205,6 +209,26 @@ export function ExportSheet({ open, setOpen, kind, isAdmin, accountName, product
               </span>
             )}
           </div>
+
+          {kind === "sales" && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="export-detail" className={fieldLabel}>How much detail</Label>
+              <Select value={detail} onValueChange={value => setDetail(value as "simple" | "detailed")}>
+                <SelectTrigger id="export-detail" className={cn(fieldInput, "w-full")}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="simple" className="text-md2">Simple: one list of sales</SelectItem>
+                  <SelectItem value="detailed" className="text-md2">Detailed: split by day, with breakdowns</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="m-0 text-sm2 leading-[1.45] text-subtle">
+                {detail === "detailed"
+                  ? "Adds a revenue breakdown, a profit breakdown, the time of every sale, and a subtotal for each day."
+                  : "The headline figures, the chart, and every sale in one list."}
+              </p>
+            </div>
+          )}
 
           {period === "custom" && (
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
