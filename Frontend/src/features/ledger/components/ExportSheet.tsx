@@ -9,9 +9,10 @@ import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetT
 import { fetchAllSales } from "@/features/ledger/data/queries";
 import { money, today } from "@/lib/format";
 import {
-  endOfMonth, formatDay, isSale, saleProfit, shiftDays, shiftMonths,
+  bucketSales, endOfMonth, formatDay, isSale, saleProfit, shiftDays, shiftMonths,
   startOfMonth, startOfWeek, totalOf, withinRange
 } from "@/lib/ledger";
+import type { Grouping } from "@/lib/ledger";
 import { isSupabaseConfigured } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
 import type { Account, Product, Transaction } from "@/features/ledger/types";
@@ -61,6 +62,18 @@ function boundsFor(period: Period, from: string, to: string): { from: string; to
 
 const ALL = "__all__";
 
+// The first two fold every day in the range together to show the shop's rhythm; the rest walk
+// the calendar to show the trend.
+const groupings: { key: Grouping; label: string }[] = [
+  { key: "hourOfDay", label: "Hour of the day" },
+  { key: "weekday", label: "Day of the week" },
+  { key: "day", label: "Day by day" },
+  { key: "week", label: "Week by week" },
+  { key: "month", label: "Month by month" }
+];
+
+type Shape = "simple" | "detailed" | "time";
+
 type Props = {
   open: boolean;
   setOpen: (open: boolean) => void;
@@ -79,7 +92,9 @@ export function ExportSheet({ open, setOpen, kind, isAdmin, accountName, product
   const [customTo, setCustomTo] = useState(today());
   const [person, setPerson] = useState(ALL);
   // Simple is one flat list. Detailed splits the range into days and adds the breakdowns.
-  const [detail, setDetail] = useState<"simple" | "detailed">("simple");
+  // Time is the distribution: one row per slice of time rather than per sale.
+  const [detail, setDetail] = useState<Shape>("simple");
+  const [grouping, setGrouping] = useState<Grouping>("hourOfDay");
   const [productId, setProductId] = useState(ALL);
   const [busy, setBusy] = useState(false);
 
@@ -89,7 +104,7 @@ export function ExportSheet({ open, setOpen, kind, isAdmin, accountName, product
   // either leaves those pages with a single row, so the choice is not offered.
   const wholeShop = kind === "sales" && detail === "detailed";
 
-  function chooseDetail(value: "simple" | "detailed") {
+  function chooseDetail(value: Shape) {
     setDetail(value);
     if (value !== "detailed") return;
     setPerson(ALL);
@@ -134,7 +149,12 @@ export function ExportSheet({ open, setOpen, kind, isAdmin, accountName, product
         productId === ALL ? null : products.find(p => p.id === productId)?.name ?? null
       ].filter(Boolean) as string[];
 
-      if (kind === "sales") {
+      if (detail === "time") {
+        await pdf.downloadTimeDistributionReport({
+          buckets: bucketSales(rows, grouping, from, to),
+          totals, grouping, from, to, isAdmin, by: accountName, scope
+        });
+      } else if (kind === "sales") {
         const report = { rows, totals, from, to, isAdmin, by: accountName, scope, products };
         if (detail === "detailed") await pdf.downloadDetailedSalesReport(report);
         else await pdf.downloadSimpleSalesReport(report);
@@ -194,9 +214,11 @@ export function ExportSheet({ open, setOpen, kind, isAdmin, accountName, product
             Export {kind === "sales" ? "sales" : "summary"}
           </SheetTitle>
           <SheetDescription className="text-sm2 text-subtle">
-            {kind === "sales"
-              ? "Every matching sale, listed with a daily chart."
-              : "Totals, best sellers and who sold what, with a daily chart."}
+            {detail === "time"
+              ? "Takings grouped by slice of time, charted and tabled."
+              : kind === "sales"
+                ? "Every matching sale, listed with a daily chart."
+                : "Totals, best sellers and who sold what, with a daily chart."}
           </SheetDescription>
         </SheetHeader>
 
@@ -220,22 +242,54 @@ export function ExportSheet({ open, setOpen, kind, isAdmin, accountName, product
             )}
           </div>
 
-          {kind === "sales" && (
-            <div className="grid gap-1.5">
-              <Label htmlFor="export-detail" className={fieldLabel}>How much detail</Label>
-              <Select value={detail} onValueChange={value => chooseDetail(value as "simple" | "detailed")}>
-                <SelectTrigger id="export-detail" className={cn(fieldInput, "w-full")}>
+          <div className="grid gap-1.5">
+            <Label htmlFor="export-detail" className={fieldLabel}>
+              {kind === "sales" ? "How much detail" : "What to export"}
+            </Label>
+            <Select value={detail} onValueChange={value => chooseDetail(value as Shape)}>
+              <SelectTrigger id="export-detail" className={cn(fieldInput, "w-full")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {kind === "sales" ? (
+                  <>
+                    <SelectItem value="simple" className="text-md2">Simple: one list of sales</SelectItem>
+                    <SelectItem value="detailed" className="text-md2">Detailed: split by day, with breakdowns</SelectItem>
+                  </>
+                ) : (
+                  <SelectItem value="simple" className="text-md2">Summary: totals, best sellers, who sold what</SelectItem>
+                )}
+                <SelectItem value="time" className="text-md2">Time distribution: when the money comes in</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="m-0 text-sm2 leading-[1.45] text-subtle">
+              {detail === "detailed"
+                ? "Adds a revenue breakdown, a profit breakdown, the time of every sale, and a subtotal for each day. Covers the whole shop."
+                : detail === "time"
+                  ? "A chart of takings across the range, then the same figures as a table. No individual sales."
+                  : kind === "sales"
+                    ? "The headline figures, the chart, and every sale, split by day."
+                    : "The headline figures, a daily chart, the best sellers and a line per person."}
+            </p>
+          </div>
+
+          {detail === "time" && (
+            <div className="mt-5 grid gap-1.5">
+              <Label htmlFor="export-grouping" className={fieldLabel}>Group by</Label>
+              <Select value={grouping} onValueChange={value => setGrouping(value as Grouping)}>
+                <SelectTrigger id="export-grouping" className={cn(fieldInput, "w-full")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="simple" className="text-md2">Simple: one list of sales</SelectItem>
-                  <SelectItem value="detailed" className="text-md2">Detailed: split by day, with breakdowns</SelectItem>
+                  {groupings.map(g => (
+                    <SelectItem key={g.key} value={g.key} className="text-md2">{g.label}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <p className="m-0 text-sm2 leading-[1.45] text-subtle">
-                {detail === "detailed"
-                  ? "Adds a revenue breakdown, a profit breakdown, the time of every sale, and a subtotal for each day. Covers the whole shop."
-                  : "The headline figures, the chart, and every sale, split by day."}
+                {grouping === "hourOfDay" || grouping === "weekday"
+                  ? "Every day in the range is folded together, so a quiet Tuesday and a busy one land in the same bar."
+                  : "One bar per step through the range, quiet ones included."}
               </p>
             </div>
           )}

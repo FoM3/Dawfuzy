@@ -1,5 +1,6 @@
 import { money } from "@/lib/format";
 import { formatDay, saleProfit, shiftDays } from "@/lib/ledger";
+import type { Bucket, Grouping } from "@/lib/ledger";
 import type { Product, Transaction } from "@/features/ledger/types";
 
 export type SalesReport = {
@@ -95,17 +96,19 @@ function summaryRow(doc: Doc, width: number, margin: number, y: number, cells: [
   doc.setFont("helvetica", "normal");
 }
 
-// A revenue-per-day bar chart drawn with plain rectangles. A charting library would be another
-// dependency and a rasterised image; this stays vector and weighs nothing. Buckets are capped so
-// a long range stays readable rather than becoming a comb.
+// A bar chart drawn with plain rectangles. A charting library would be another dependency and a
+// rasterised image; this stays vector and weighs nothing. Each bar carries its own short tick, so
+// the same chart draws revenue per day, per hour or per month.
 function drawChart(
   doc: Doc,
-  days: { date: string; revenue: number }[],
+  bars: { tick: string; value: number }[],
   x: number,
   y: number,
   width: number,
   height: number,
-  title: string
+  title: string,
+  // Picks out the biggest bar, which is the whole point of a distribution.
+  markPeak = false
 ) {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(11);
@@ -114,9 +117,9 @@ function drawChart(
 
   const plotTop = y + 14;
   const plotHeight = height - 28;
-  const peak = Math.max(...days.map(d => d.revenue), 0);
+  const peak = Math.max(...bars.map(b => b.value), 0);
 
-  if (peak <= 0 || days.length === 0) {
+  if (peak <= 0 || bars.length === 0) {
     doc.setFont("helvetica", "normal");
     doc.setFontSize(9);
     doc.setTextColor(muted);
@@ -141,24 +144,22 @@ function drawChart(
     );
   }
 
-  const slot = (width - axisWidth) / days.length;
+  const slot = (width - axisWidth) / bars.length;
   const barWidth = Math.max(Math.min(slot * 0.62, 22), 1.5);
-  days.forEach((day, i) => {
-    const barHeight = (day.revenue / peak) * plotHeight;
+  bars.forEach((bar, i) => {
+    const barHeight = (bar.value / peak) * plotHeight;
     const bx = x + axisWidth + slot * i + (slot - barWidth) / 2;
-    doc.setFillColor(day.revenue > 0 ? "#c98b63" : rule);
+    doc.setFillColor(bar.value <= 0 ? rule : markPeak && bar.value === peak ? ink : "#c98b63");
     doc.rect(bx, plotTop + plotHeight - barHeight, barWidth, Math.max(barHeight, 0.6), "F");
   });
 
   // Only label what will fit; crowded ticks are worse than none.
-  const every = Math.ceil(days.length / 14);
+  const every = Math.ceil(bars.length / 14);
   doc.setFontSize(6.5);
   doc.setTextColor(muted);
-  days.forEach((day, i) => {
+  bars.forEach((bar, i) => {
     if (i % every !== 0) return;
-    doc.text(String(Number(day.date.slice(8, 10))), x + axisWidth + slot * i + slot / 2, plotTop + plotHeight + 11, {
-      align: "center"
-    });
+    doc.text(bar.tick, x + axisWidth + slot * i + slot / 2, plotTop + plotHeight + 11, { align: "center" });
   });
 
   return plotTop + plotHeight + 22;
@@ -168,11 +169,12 @@ function drawChart(
 function perDaySeries(rows: Transaction[], from: string, to: string) {
   const totals = new Map<string, number>();
   for (const row of rows) totals.set(row.date, (totals.get(row.date) ?? 0) + row.amount);
+  const bar = (date: string, value: number) => ({ tick: String(Number(date.slice(8, 10))), value });
   if (!from || !to) {
-    return [...totals.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, revenue]) => ({ date, revenue }));
+    return [...totals.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, value]) => bar(date, value));
   }
-  const days: { date: string; revenue: number }[] = [];
-  for (let d = from; d <= to; d = shiftDays(d, 1)) days.push({ date: d, revenue: totals.get(d) ?? 0 });
+  const days: { tick: string; value: number }[] = [];
+  for (let d = from; d <= to; d = shiftDays(d, 1)) days.push(bar(d, totals.get(d) ?? 0));
   return days;
 }
 
@@ -340,7 +342,7 @@ export async function downloadDetailedSalesReport(report: SalesReport) {
   header(doc, width, margin, "Sales report", report.from, report.to, report.by, report.scope);
 
   const series = perDaySeries(report.rows, report.from, report.to);
-  const trading = series.filter(d => d.revenue > 0).length;
+  const trading = series.filter(d => d.value > 0).length;
   const perTradingDay = trading > 0 ? report.totals.revenue / trading : 0;
 
   // Totals come from the server rollup, so they describe the range even though the
@@ -625,4 +627,129 @@ export async function downloadAnalyticsReport(report: AnalyticsReport) {
   );
 
   doc.save(`dawfuzy-analytics-${fileSafe(report.from, report.to)}.pdf`);
+}
+
+export type TimeReport = {
+  buckets: Bucket[];
+  totals: { revenue: number; profit: number; units: number; count: number };
+  // What the buckets are, for the chart title and the first column's header.
+  grouping: Grouping;
+  from: string;
+  to: string;
+  isAdmin: boolean;
+  by: string;
+  scope?: string[];
+};
+
+const groupingCopy: Record<Grouping, { noun: string; plural: string; column: string; chart: string }> = {
+  hourOfDay: { noun: "hour of the day", plural: "hours of the day", column: "Hour", chart: "Revenue by hour of the day" },
+  weekday:   { noun: "day of the week", plural: "days of the week", column: "Day", chart: "Revenue by day of the week" },
+  day:       { noun: "day",             plural: "days",             column: "Day", chart: "Revenue per day" },
+  week:      { noun: "week",            plural: "weeks",            column: "Week", chart: "Revenue per week" },
+  month:     { noun: "month",           plural: "months",           column: "Month", chart: "Revenue per month" }
+};
+
+// When the money comes in: one bar per slice of time, then the same figures as a table. The two
+// fold-together groupings answer a different question from the calendar ones, so the subtitle
+// says which is on the page. jsPDF is ~350KB, so it is imported here rather than at the top.
+export async function downloadTimeDistributionReport(report: TimeReport) {
+  const [{ jsPDF }, autoTableModule] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
+  const autoTable = autoTableModule.default;
+
+  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+  const width = doc.internal.pageSize.getWidth();
+  const margin = 40;
+  const admin = report.isAdmin;
+  const copy = groupingCopy[report.grouping];
+
+  header(doc, width, margin, `Time distribution by ${copy.noun}`, report.from, report.to, report.by, report.scope);
+
+  const tallied = report.buckets.map(bucket => {
+    const t = blank();
+    for (const row of bucket.rows) {
+      t.revenue += row.amount;
+      t.profit += saleProfit(row);
+      t.units += row.quantity;
+      t.count += 1;
+    }
+    return { ...bucket, ...t };
+  });
+
+  const busiest = tallied.reduce<(typeof tallied)[number] | null>(
+    (best, b) => (b.revenue > (best?.revenue ?? 0) ? b : best), null
+  );
+  const active = tallied.filter(b => b.count > 0).length;
+
+  summaryRow(doc, width, margin, 118, [
+    ["Revenue", cash(report.totals.revenue)],
+    ...(admin ? ([["Profit", cash(report.totals.profit)]] as [string, string][]) : []),
+    ["Sales", String(report.totals.count)],
+    [`Busiest ${copy.column.toLowerCase()}`, busiest && busiest.revenue > 0 ? busiest.label.split(" to ")[0] : "\u2014"]
+  ]);
+
+  const afterChart = drawChart(
+    doc, tallied.map(b => ({ tick: b.tick, value: b.revenue })),
+    margin, 166, width - margin * 2, 120, copy.chart, true
+  );
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8.5);
+  doc.setTextColor(muted);
+  const rhythm = report.grouping === "hourOfDay" || report.grouping === "weekday";
+  doc.text(
+    rhythm
+      ? `Every ${copy.noun} in the range is folded together, so this reads as the shop's rhythm rather than its trend.`
+      : `One row per ${copy.noun} across the range, quiet ones included.`,
+    margin, afterChart + 2
+  );
+  doc.text(`${active} of ${tallied.length} ${copy.plural} saw a sale.`, margin, afterChart + 14);
+
+  const head = [copy.column, "Sales", "Units", "Revenue", "Share", ...(admin ? ["Profit"] : [])];
+  const body = tallied.map(b => [
+    b.label,
+    String(b.count),
+    String(b.units),
+    cash(b.revenue),
+    share(b.revenue, report.totals.revenue),
+    ...(admin ? [cash(b.profit)] : [])
+  ]);
+  body.push([
+    "Total",
+    String(report.totals.count),
+    String(report.totals.units),
+    cash(report.totals.revenue),
+    report.totals.revenue > 0 ? "100%" : "0%",
+    ...(admin ? [cash(report.totals.profit)] : [])
+  ]);
+
+  autoTable(doc, {
+    head: [head],
+    body,
+    startY: afterChart + 28,
+    margin: { left: margin, right: margin, bottom: 48 },
+    // Tighter than the other reports: 24 hours plus a total is the longest this table gets,
+    // and it is worth keeping on one page.
+    styles: { font: "helvetica", fontSize: 9, cellPadding: 3.5, textColor: ink, lineColor: rule, lineWidth: 0.5 },
+    headStyles: { fillColor: "#14312f", textColor: "#ffffff", fontSize: 8 },
+    alternateRowStyles: { fillColor: "#f6f4ef" },
+    // Fixed widths for the figures, so the share reads beside its header rather than
+    // stranded at the far side of a column stretched to fill the page.
+    columnStyles: {
+      1: { halign: "right", cellWidth: 46 },
+      2: { halign: "right", cellWidth: 46 },
+      3: { halign: "right", cellWidth: 86 },
+      4: { halign: "right", cellWidth: 48 },
+      5: { halign: "right", cellWidth: 86 }
+    },
+    // The last row is the total, which should not be mistaken for another bucket.
+    willDrawCell: data => {
+      if (data.section === "body" && data.row.index === body.length - 1) {
+        data.cell.styles.fillColor = "#e7ebe8";
+        data.cell.styles.fontStyle = "bold";
+      }
+    }
+  });
+
+  paginate(doc, width, margin);
+  doc.save(`dawfuzy-time-${report.grouping}-${fileSafe(report.from, report.to)}.pdf`);
 }
