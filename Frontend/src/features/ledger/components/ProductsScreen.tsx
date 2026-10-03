@@ -1,5 +1,5 @@
 import { FormEvent, useMemo, useState } from "react";
-import { Archive, Boxes, Droplet, Package, Pencil, Plus, RotateCcw, Search, X } from "lucide-react";
+import { Archive, Boxes, Droplet, Package, Pencil, Plus, RotateCcw, Search, Truck, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -12,9 +12,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Eyebrow } from "@/features/marketing/components/Eyebrow";
 import { packTypes } from "@/features/ledger/data/mock-data";
-import { money, toNumber } from "@/lib/format";
+import { mapsLink, money, toNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { PackType, Product, ProductDraft } from "@/features/ledger/types";
+import type { PackType, Product, ProductDraft, ProductSupplier, Supplier, SupplierDraft } from "@/features/ledger/types";
+import { SupplierSheet, deliveryLabel } from "@/features/ledger/components/SupplierSheet";
 
 const fieldLabel = "text-xs2 font-bold tracking-[1.4px] text-subtle uppercase";
 const fieldInput = "h-auto rounded-[3px] border-field-line bg-field p-3.5 text-md2 text-ink";
@@ -27,17 +28,56 @@ const blank = { name: "", description: "", pack: "Pack" as PackType, costPrice: 
 
 type Props = {
   products: Product[];
-  addProduct: (draft: ProductDraft) => boolean;
+  // Admin-only. A staff session never receives these, so both arrive empty.
+  suppliers: Supplier[];
+  supplierLinks: ProductSupplier[];
+  saveSupplier: (draft: SupplierDraft, id?: string) => Promise<boolean>;
+  setSupplierProducts: (supplierId: string, productIds: string[]) => Promise<void>;
+  saveSupplierLink: (link: ProductSupplier) => Promise<void>;
+  removeSupplierLink: (productId: string, supplierId: string) => Promise<void>;
+  addProduct: (draft: ProductDraft) => string | null;
   updateProduct: (id: string, draft: ProductDraft) => boolean;
   setRetired: (id: string, retired: boolean) => void;
   // Users may read the catalogue but never see cost or profit, and never change it.
   canEdit: boolean;
 };
 
-export function ProductsScreen({ products, addProduct, updateProduct, setRetired, canEdit }: Props) {
+export function ProductsScreen({
+  products, addProduct, updateProduct, setRetired, canEdit,
+  suppliers, supplierLinks, saveSupplier, setSupplierProducts, saveSupplierLink, removeSupplierLink
+}: Props) {
   const [confirmRetire, setConfirmRetire] = useState<Product | null>(null);
+  // Set for the moment between creating a product and closing the sheet, while the
+  // supplier section is offered.
+  const [justAdded, setJustAdded] = useState(false);
+  const [addingSource, setAddingSource] = useState("");
+  const [sourceCost, setSourceCost] = useState("");
+  // The supplier drawer, opened over this one so a source can be created without losing
+  // the product being edited.
+  const [sourceSheet, setSourceSheet] = useState(false);
+
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  // The sources linked to whatever product the sheet is editing, and the ones still free
+  // to add. Both are empty for a staff session, which never receives supplier rows at all.
+  const linkedSources = useMemo(
+    () => supplierLinks
+      .filter(link => link.productId === editingId)
+      .map(link => ({ link, supplier: suppliers.find(s => s.id === link.supplierId) }))
+      .sort((a, b) => (a.supplier?.name ?? "").localeCompare(b.supplier?.name ?? "")),
+    [supplierLinks, suppliers, editingId]
+  );
+  const sourceCount = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const link of supplierLinks) counts[link.productId] = (counts[link.productId] ?? 0) + 1;
+    return counts;
+  }, [supplierLinks]);
+
+  const unlinkedSuppliers = useMemo(
+    () => suppliers.filter(s => !s.retiredAt && !linkedSources.some(l => l.link.supplierId === s.id)),
+    [suppliers, linkedSources]
+  );
   const [form, setForm] = useState(blank);
   const [query, setQuery] = useState("");
   // Retired sits alongside the pack types rather than in its own control: a retired
@@ -54,9 +94,9 @@ export function ProductsScreen({ products, addProduct, updateProduct, setRetired
       .filter(p =>
         packFilter === "All" ? true : packFilter === "Retired" ? Boolean(p.retiredAt) : p.pack === packFilter
       )
-      .filter(p => !term || p.name.toLowerCase().includes(term) || p.description.toLowerCase().includes(term))
-      // Retired last, so the sellable catalogue reads first.
-      .sort((a, b) => Number(Boolean(a.retiredAt)) - Number(Boolean(b.retiredAt)));
+      // No sort: the catalogue arrives ordered, retired last and alphabetical within, and
+      // filtering keeps that order.
+      .filter(p => !term || p.name.toLowerCase().includes(term) || p.description.toLowerCase().includes(term));
   }, [products, query, packFilter]);
 
   const costValue = toNumber(form.costPrice);
@@ -73,11 +113,13 @@ export function ProductsScreen({ products, addProduct, updateProduct, setRetired
   function openAdd() {
     setEditingId(null);
     setForm(blank);
+    setJustAdded(false);
     setOpen(true);
   }
 
   function openEdit(product: Product) {
     setEditingId(product.id);
+    setJustAdded(false);
     setForm({
       name: product.name,
       description: product.description,
@@ -97,8 +139,16 @@ export function ProductsScreen({ products, addProduct, updateProduct, setRetired
       costPrice: costValue,
       price: priceValue
     };
-    const saved = editingId ? updateProduct(editingId, draft) : addProduct(draft);
-    if (saved) setOpen(false);
+    if (editingId) {
+      if (updateProduct(editingId, draft)) setOpen(false);
+      return;
+    }
+    const newId = addProduct(draft);
+    if (!newId) return;
+    // Held open on the product just created, because the supplier is the thing you know
+    // at the moment you add it and would otherwise have to come back for.
+    setEditingId(newId);
+    setJustAdded(true);
   }
 
   return (
@@ -195,6 +245,7 @@ export function ProductsScreen({ products, addProduct, updateProduct, setRetired
             </thead>
             <tbody>
               {visible.map((product, index) => {
+                const sources = sourceCount[product.id] ?? 0;
                 const profit = product.price - product.costPrice;
                 const percent = product.costPrice > 0 ? (profit / product.costPrice) * 100 : 0;
                 const Icon = packIcon[product.pack];
@@ -207,7 +258,22 @@ export function ProductsScreen({ products, addProduct, updateProduct, setRetired
                           <Icon className="size-4.5" aria-hidden="true" />
                         </span>
                         <div className="min-w-0">
-                          <strong className="block font-semibold">{product.name}</strong>
+                          {/* The mark rides on the name's line: a product without a source
+                              shows nothing, so the row keeps its height. */}
+                          <strong className="flex items-center gap-1.5 font-semibold">
+                            <span className="min-w-0">{product.name}</span>
+                            {canEdit && sources > 0 && (
+                              <span
+                                title={`${sources} ${sources === 1 ? "supplier" : "suppliers"} linked`}
+                                className="shrink-0 text-info"
+                              >
+                                <Truck className="size-3.5" aria-hidden="true" />
+                                <span className="sr-only">
+                                  {sources === 1 ? "1 supplier linked" : `${sources} suppliers linked`}
+                                </span>
+                              </span>
+                            )}
+                          </strong>
                           {product.retiredAt && (
                             <span className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-band px-2 py-0.5 text-xs2 text-subtle">
                               Retired
@@ -233,32 +299,36 @@ export function ProductsScreen({ products, addProduct, updateProduct, setRetired
                     <td className={cn(td, "text-right")}>
                       {canEdit ? (
                         <span className="inline-flex items-center justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => openEdit(product)}
-                            aria-label={`Edit ${product.name}`}
-                            className="inline-flex items-center gap-1.5 rounded border border-line bg-field px-3 py-2 text-sm2 whitespace-nowrap text-brandtext transition-colors hover:border-brandtext"
-                          >
-                            <Pencil className="size-3.5" aria-hidden="true" /> Edit
-                          </button>
                           {product.retiredAt ? (
+                            // Retired leaves one thing to do. Editing a product that is not
+                            // for sale only invites changes nobody will see.
                             <button
                               type="button"
                               onClick={() => setRetired(product.id, false)}
                               aria-label={`Bring back ${product.name}`}
-                              className="inline-flex items-center gap-1.5 rounded border border-line bg-field px-3 py-2 text-sm2 whitespace-nowrap text-pos transition-colors hover:border-pos"
+                              className="inline-flex items-center gap-1.5 rounded border border-pos bg-pos px-3.5 py-2 text-sm2 font-semibold whitespace-nowrap text-white transition-opacity hover:opacity-90"
                             >
                               <RotateCcw className="size-3.5" aria-hidden="true" /> Bring back
                             </button>
                           ) : (
-                            <button
-                              type="button"
-                              onClick={() => setConfirmRetire(product)}
-                              aria-label={`Retire ${product.name}`}
-                              className="inline-flex items-center gap-1.5 rounded border border-line bg-field px-3 py-2 text-sm2 whitespace-nowrap text-neg transition-colors hover:border-neg"
-                            >
-                              <Archive className="size-3.5" aria-hidden="true" /> Retire
-                            </button>
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => openEdit(product)}
+                                aria-label={`Edit ${product.name}`}
+                                className="inline-flex items-center gap-1.5 rounded border border-line bg-field px-3 py-2 text-sm2 whitespace-nowrap text-brandtext transition-colors hover:border-brandtext"
+                              >
+                                <Pencil className="size-3.5" aria-hidden="true" /> Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmRetire(product)}
+                                aria-label={`Retire ${product.name}`}
+                                className="inline-flex items-center gap-1.5 rounded border border-line bg-field px-3 py-2 text-sm2 whitespace-nowrap text-neg transition-colors hover:border-neg"
+                              >
+                                <Archive className="size-3.5" aria-hidden="true" /> Retire
+                              </button>
+                            </>
                           )}
                         </span>
                       ) : (
@@ -297,12 +367,30 @@ export function ProductsScreen({ products, addProduct, updateProduct, setRetired
         </AlertDialogContent>
       </AlertDialog>
 
+      <SupplierSheet
+        open={sourceSheet}
+        setOpen={setSourceSheet}
+        editing={null}
+        suppliers={suppliers}
+        products={products}
+        links={supplierLinks}
+        saveSupplier={saveSupplier}
+        setSupplierProducts={setSupplierProducts}
+        presetProductId={editingId ?? undefined}
+      />
+
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent side="right" className="w-full gap-0 bg-app sm:max-w-115">
+        <SheetContent side="right" className="w-full gap-0 bg-app data-[side=right]:w-full data-[side=right]:sm:max-w-192">
           <SheetHeader className="border-b border-line">
-            <SheetTitle className="font-serif text-2xl2 font-medium">{editingId ? "Edit product" : "Add product"}</SheetTitle>
+            <SheetTitle className="font-serif text-2xl2 font-medium">
+              {justAdded ? `${form.name} added` : editingId ? "Edit product" : "Add product"}
+            </SheetTitle>
             <SheetDescription className="text-sm2 text-subtle">
-              {editingId ? "New prices apply to future sales only; past sales keep their own." : "It joins the catalogue and is ready to sell straight away."}
+              {justAdded
+                ? "It is in the catalogue and ready to sell. Say where you buy it while you are here, or close this."
+                : editingId
+                  ? "New prices apply to future sales only; past sales keep their own."
+                  : "It joins the catalogue and is ready to sell straight away."}
             </SheetDescription>
           </SheetHeader>
 
@@ -414,19 +502,163 @@ export function ProductsScreen({ products, addProduct, updateProduct, setRetired
                 </div>
                 <strong className={cn("font-serif text-3xl2", sellsAtLoss && "text-neg-on-deep")}>{money(margin)}</strong>
               </div>
+
+              {sellsAtLoss && (
+                <p className="m-0 mt-2 text-sm2 leading-[1.45] text-neg">
+                  This cannot be saved: the selling price is below what you pay. Check the two
+                  figures, they look the wrong way round.
+                </p>
+              )}
+
+              {/* Only on an existing product: a link needs a product id, and a new one has
+                  none until it is saved. */}
+              {canEdit && editingId && (
+                <fieldset className="mt-7 m-0 border-0 p-0">
+                  <legend className={cn(fieldLabel, "mb-1")}>Where we buy it</legend>
+                  <p className="m-0 mb-3 text-sm2 leading-[1.45] text-subtle">
+                    Two products of the same brand can come from different people, so this is set per product.
+                  </p>
+
+                  {linkedSources.length === 0 ? (
+                    <p className="m-0 mb-3 rounded border border-line bg-field px-3.5 py-3 text-sm2 text-subtle">
+                      No source recorded yet.
+                    </p>
+                  ) : (
+                    <ul className="m-0 mb-3 grid list-none gap-2 p-0">
+                      {linkedSources.map(({ link, supplier }) => (
+                        <li key={link.supplierId} className="rounded border border-line bg-field p-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <strong className="block text-md2">{supplier?.name ?? "Unknown supplier"}</strong>
+                              <span className="mt-0.5 block text-sm2 text-subtle">
+                                {[supplier?.contactPerson, supplier?.phones?.[0], supplier?.location]
+                                  .filter(Boolean).join(" · ") || "No contact details"}
+                                {supplier?.mapCoords && (
+                                  <>
+                                    {" · "}
+                                    <a
+                                      href={mapsLink(supplier.mapCoords)}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="text-ink underline-offset-2 hover:underline"
+                                    >
+                                      Open in Maps
+                                    </a>
+                                  </>
+                                )}
+                              </span>
+                              <span className="mt-0.5 inline-flex items-center gap-1.5 text-sm2 text-subtle">
+                                <Truck className="size-3.5 shrink-0" aria-hidden="true" />
+                                {supplier ? deliveryLabel[supplier.delivery] : "—"}
+                                {link.unitCost !== null && <> · buys at {money(link.unitCost)}</>}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              aria-label={`Remove ${supplier?.name ?? "this source"}`}
+                              onClick={() => void removeSupplierLink(editingId, link.supplierId)}
+                              className="shrink-0 rounded-full border-0 bg-transparent p-1 text-subtle hover:text-neg"
+                            >
+                              <X className="size-4" aria-hidden="true" />
+                            </button>
+                          </div>
+                          {link.unitCost !== null && link.unitCost !== costValue && (
+                            <button
+                              type="button"
+                              onClick={() => setForm({ ...form, costPrice: String(link.unitCost) })}
+                              className="mt-2 rounded-full border border-line bg-panel px-3 py-1.5 text-xs2 text-ink hover:border-brandtext"
+                            >
+                              Use {money(link.unitCost)} as the cost price
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {unlinkedSuppliers.length > 0 && (
+                    <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                      <div className="grid gap-2">
+                        <select
+                          aria-label="Add a source"
+                          value={addingSource}
+                          onChange={e => setAddingSource(e.target.value)}
+                          className={cn(fieldInput, "w-full")}
+                        >
+                          <option value="">Pick an existing supplier...</option>
+                          {unlinkedSuppliers.map(supplier => (
+                            <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
+                          ))}
+                        </select>
+                        <Input
+                          aria-label="What they charge per unit"
+                          value={sourceCost}
+                          onChange={e => setSourceCost(e.target.value)}
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          inputMode="decimal"
+                          placeholder={`What they charge per ${unit} (optional)`}
+                          className={fieldInput}
+                        />
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={!addingSource}
+                        onClick={() => {
+                          const cost = sourceCost.trim();
+                          void saveSupplierLink({
+                            productId: editingId,
+                            supplierId: addingSource,
+                            unitCost: cost === "" ? null : toNumber(cost),
+                            note: ""
+                          });
+                          setAddingSource("");
+                          setSourceCost("");
+                        }}
+                        className="h-12 self-start border-line px-5 text-md2"
+                      >
+                        Add
+                      </Button>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setSourceSheet(true)}
+                    className="mt-3 inline-flex items-center gap-2 rounded-full border border-line bg-field px-4 py-2.5 text-sm2 text-ink hover:border-brandtext"
+                  >
+                    <Plus className="size-4" aria-hidden="true" />
+                    {suppliers.length === 0 ? "Add the first supplier" : "New supplier"}
+                  </button>
+                </fieldset>
+              )}
             </div>
 
             <SheetFooter className="flex-row gap-2 border-t border-line">
+              {justAdded ? (
+                <Button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="h-12 flex-1 bg-accent text-md2 font-semibold text-on-accent hover:bg-accent-hover"
+                >
+                  Done
+                </Button>
+              ) : (
+                <>
               <Button type="button" variant="outline" onClick={() => setOpen(false)} className="h-12 flex-1 text-md2">
                 Cancel
               </Button>
               <Button
                 type="submit"
-                disabled={duplicate}
+                disabled={duplicate || sellsAtLoss}
                 className="h-12 flex-1 bg-accent text-md2 font-semibold text-on-accent hover:bg-accent-hover"
               >
                 {editingId ? "Save changes" : "Save product"}
               </Button>
+                </>
+              )}
             </SheetFooter>
           </form>
         </SheetContent>

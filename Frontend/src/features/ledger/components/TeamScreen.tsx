@@ -373,7 +373,7 @@ export function TeamScreen({ accounts, currentId, addAccount, setActive, updateP
       </AlertDialog>
 
       <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent side="right" className="w-full gap-0 bg-app sm:max-w-115">
+        <SheetContent side="right" className="w-full gap-0 bg-app data-[side=right]:w-full data-[side=right]:sm:max-w-192">
           <SheetHeader className="border-b border-line">
             <SheetTitle className="font-serif text-2xl2 font-medium">Add person</SheetTitle>
             <SheetDescription className="text-sm2 text-subtle">

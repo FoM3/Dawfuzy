@@ -12,16 +12,17 @@ import { AuditScreen } from "@/features/ledger/components/AuditScreen";
 import { AccountScreen } from "@/features/ledger/components/AccountScreen";
 import { ProductsScreen } from "@/features/ledger/components/ProductsScreen";
 import { SalesHistoryScreen } from "@/features/ledger/components/SalesHistoryScreen";
+import { SuppliersScreen } from "@/features/ledger/components/SuppliersScreen";
 import { seedAccounts, seedProducts, seedTransactions } from "@/features/ledger/data/mock-data";
 import { clockTime, money, today, toNumber } from "@/lib/format";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { probeConnection } from "@/lib/connection";
 import { changeMyName, changeMyPin, createPerson, currentAccount, resetPinFor, setPersonActive, signInWithPin, signOutRemote, updatePersonDetails } from "@/features/ledger/data/auth";
-import { addPending, clearFailures, countPending, dropPending, flushOutbox, pullPeople, pullProducts, pushAudit, pushProduct, readPending, setAsideReasons, syncFailureReason, type SyncState } from "@/lib/sync";
+import { addPending, clearFailures, countPending, dropPending, flushOutbox, linkSupplier, pullPeople, pullProducts, pullProductSuppliers, pullSuppliers, pushAudit, pushProduct, pushSupplier, readPending, removeSupplier as removeSupplierRemote, setAsideReasons, syncFailureReason, unlinkSupplier, type SyncState } from "@/lib/sync";
 import { deleteSale, updateSale, useSalesByProduct } from "@/features/ledger/data/queries";
 import { formatDay } from "@/lib/ledger";
 import { useKeyboardInset } from "@/lib/use-keyboard-inset";
-import type { Account, AuditAction, AuditEntry, LedgerScreen, Product, ProductDraft, Role, Transaction } from "@/features/ledger/types";
+import type { Account, AuditAction, AuditEntry, LedgerScreen, Product, ProductDraft, ProductSupplier, Role, Supplier, SupplierDraft, Transaction } from "@/features/ledger/types";
 import { isAdminRole, userScreens } from "@/features/ledger/types";
 
 type LedgerProps = {
@@ -36,6 +37,9 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
   // Nothing here is cached on the device. The seeds are only a starting shape for the
   // first paint and for running without Supabase; the server overwrites them on refresh.
   const [products, setProducts] = useState<Product[]>(seedProducts);
+  // Admin-only, and the tables have no public view, so a staff session reads back nothing.
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [supplierLinks, setSupplierLinks] = useState<ProductSupplier[]>([]);
   // Anything recorded here but not yet acknowledged by the server comes back on boot, so
   // a sale rung up during an outage is still on screen and still waiting to be sent.
   const [transactions, setTransactions] = useState<Transaction[]>(() => [...seedTransactions, ...readPending()]);
@@ -163,6 +167,18 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
       ]);
       if (remoteProducts.length) setProducts(remoteProducts);
       if (people.length) setAccounts(people);
+      // Kept out of the block above: the supplier tables arrive with a schema change, and
+      // until it is run every other list should still load rather than the whole refresh failing.
+      if (asAdmin) {
+        try {
+          const [sources, links] = await Promise.all([pullSuppliers(supabase), pullProductSuppliers(supabase)]);
+          setSuppliers(sources);
+          setSupplierLinks(links);
+        } catch {
+          setSuppliers([]);
+          setSupplierLinks([]);
+        }
+      }
       await flush();
     } catch {
       setSync("error");
@@ -473,11 +489,114 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
       toast.error("Set a selling price above zero");
       return false;
     }
+    // A product that sells for less than it costs is a typo far more often than a decision,
+    // and it quietly drags the profit figure negative for every sale afterwards.
+    if (draft.costPrice > 0 && draft.price < draft.costPrice) {
+      toast.error(`Selling price is below the ${money(draft.costPrice)} cost. Check the two figures.`);
+      return false;
+    }
     return true;
   }
 
+  // Suppliers are admin-only, so every one of these is a straight server write with the
+  // local copy updated to match; there is no offline queue for them.
+  async function saveSupplier(draft: SupplierDraft, id?: string) {
+    const name = draft.name.trim();
+    if (!name) {
+      toast.error("Give the supplier a name");
+      return false;
+    }
+    const supplier: Supplier = { ...draft, name, id: id ?? crypto.randomUUID() };
+    const was = suppliers.find(entry => entry.id === supplier.id);
+    setSuppliers(current =>
+      was ? current.map(entry => (entry.id === supplier.id ? supplier : entry)) : [...current, supplier]
+    );
+    if (supabase) {
+      try {
+        await pushSupplier(supabase, supplier);
+      } catch {
+        setSuppliers(current => (was ? current.map(e => (e.id === supplier.id ? was : e)) : current.filter(e => e.id !== supplier.id)));
+        toast.error("Could not save the supplier");
+        return false;
+      }
+    }
+    record(was ? "supplier.updated" : "supplier.added", supplier.name,
+      [supplier.contactPerson, supplier.phones[0], supplier.location].filter(Boolean).join(" · ") || "No contact details");
+    toast.success(was ? `${supplier.name} updated` : `${supplier.name} added`);
+    return true;
+  }
+
+  async function removeSupplier(id: string) {
+    const gone = suppliers.find(entry => entry.id === id);
+    if (!gone) return;
+    setSuppliers(current => current.filter(entry => entry.id !== id));
+    setSupplierLinks(current => current.filter(link => link.supplierId !== id));
+    if (supabase) {
+      try {
+        await removeSupplierRemote(supabase, id);
+      } catch {
+        setSuppliers(current => [...current, gone]);
+        toast.error("Could not remove the supplier");
+        return;
+      }
+    }
+    record("supplier.removed", gone.name, "Unlinked from every product");
+    toast.success(`${gone.name} removed`);
+  }
+
+  async function saveSupplierLink(link: ProductSupplier) {
+    const was = supplierLinks.find(l => l.productId === link.productId && l.supplierId === link.supplierId);
+    setSupplierLinks(current =>
+      was ? current.map(l => (l === was ? link : l)) : [...current, link]
+    );
+    if (supabase) {
+      try {
+        await linkSupplier(supabase, link);
+      } catch {
+        setSupplierLinks(current => (was ? current.map(l => (l.productId === link.productId && l.supplierId === link.supplierId ? was : l)) : current.filter(l => l !== link)));
+        toast.error("Could not save that source");
+        return;
+      }
+    }
+    const supplier = suppliers.find(entry => entry.id === link.supplierId);
+    const product = products.find(entry => entry.id === link.productId);
+    record(was ? "supplier.linked" : "supplier.linked", `${product?.name ?? "Product"} · ${supplier?.name ?? "Supplier"}`,
+      link.unitCost === null ? "No buying price" : `Buys at ${money(link.unitCost)}`);
+  }
+
+  // Applied as a set rather than one link at a time, because the supplier sheet edits the
+  // whole selection and only the difference should reach the server.
+  async function setSupplierProducts(supplierId: string, productIds: string[]) {
+    const current = supplierLinks.filter(link => link.supplierId === supplierId).map(link => link.productId);
+    for (const productId of productIds.filter(id => !current.includes(id))) {
+      await saveSupplierLink({ productId, supplierId, unitCost: null, note: "" });
+    }
+    for (const productId of current.filter(id => !productIds.includes(id))) {
+      await removeSupplierLink(productId, supplierId);
+    }
+  }
+
+  async function removeSupplierLink(productId: string, supplierId: string) {
+    const was = supplierLinks.find(l => l.productId === productId && l.supplierId === supplierId);
+    setSupplierLinks(current => current.filter(l => !(l.productId === productId && l.supplierId === supplierId)));
+    if (supabase) {
+      try {
+        await unlinkSupplier(supabase, productId, supplierId);
+      } catch {
+        if (was) setSupplierLinks(current => [...current, was]);
+        toast.error("Could not remove that source");
+        return;
+      }
+    }
+    const supplier = suppliers.find(entry => entry.id === supplierId);
+    const product = products.find(entry => entry.id === productId);
+    record("supplier.unlinked", `${product?.name ?? "Product"} · ${supplier?.name ?? "Supplier"}`, "No longer bought here");
+  }
+
+  // Returns the new id rather than a flag: the Products sheet stays open on the product it
+  // just created so its supplier can be added straight away.
   function addProduct(draft: ProductDraft) {
-    if (!validateDraft(draft)) return false;
+    if (!validateDraft(draft)) return null;
     const product: Product = {
       // Random id, never derived from the name: renaming a product must not change its identity.
       id: crypto.randomUUID(),
@@ -493,7 +612,7 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
     if (supabase) void pushProduct(supabase, product).catch(() => setSync("error"));
     record("product.added", product.name, `${product.pack} · sells at ${money(product.price)}`);
     toast.success(`${product.name} added to the catalogue`);
-    return true;
+    return product.id;
   }
 
   // Retiring takes a product off the New sale screen without touching a single past sale,
@@ -595,14 +714,28 @@ export function Ledger({ screen, setScreen }: LedgerProps) {
             updateProduct={updateProduct}
             setRetired={setProductRetired}
             canEdit={isAdmin}
+            suppliers={suppliers}
+            supplierLinks={supplierLinks}
+            saveSupplier={saveSupplier}
+            setSupplierProducts={setSupplierProducts}
+            saveSupplierLink={saveSupplierLink}
+            removeSupplierLink={removeSupplierLink}
+          />
+        )}
+        {screen === "suppliers" && isAdmin && (
+          <SuppliersScreen
+            suppliers={suppliers}
+            links={supplierLinks}
+            products={products}
+            saveSupplier={saveSupplier}
+            removeSupplier={removeSupplier}
+            setSupplierProducts={setSupplierProducts}
           />
         )}
         {screen === "audit" && isAdmin && <AuditScreen audit={audit} people={accounts} />}
         {screen === "account" && (
           <AccountScreen
             account={account}
-            audit={audit}
-            people={accounts}
             rename={name => updatePerson(account.id, name, account.role)}
             changePin={pin => changePin(account.id, pin, true)}
             signOut={signOut}

@@ -1,4 +1,4 @@
-import { ChartColumn, CircleUser, Package, Plus, Table2, Users } from "lucide-react";
+import { ChartColumn, CircleUser, Package, Plus, ScrollText, Table2, Truck, Users } from "lucide-react";
 import { Brand } from "@/components/brand";
 import type { LedgerScreen, Role } from "@/features/ledger/types";
 import { isAdminRole, userScreens } from "@/features/ledger/types";
@@ -10,8 +10,10 @@ const items: { screen: LedgerScreen; label: string; short: string; Icon: typeof 
   { screen: "entry", label: "New sale", short: "New sale", Icon: Plus },
   { screen: "history", label: "Sales history", short: "History", Icon: Table2 },
   { screen: "products", label: "Products", short: "Products", Icon: Package },
+  { screen: "suppliers", label: "Suppliers", short: "Supply", Icon: Truck },
   { screen: "team", label: "Team", short: "Team", Icon: Users },
-  // Signing out and the audit trail both live on the account page rather than the bar.
+  { screen: "audit", label: "Audit log", short: "Audit", Icon: ScrollText },
+  // Signing out lives on the account page rather than the bar.
   { screen: "account", label: "Account", short: "Account", Icon: CircleUser }
 ];
 

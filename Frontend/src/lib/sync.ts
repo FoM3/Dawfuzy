@@ -1,7 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Account, AuditEntry, Product, Transaction } from "@/features/ledger/types";
+import type { Account, AuditEntry, Product, ProductSupplier, Supplier, Transaction } from "@/features/ledger/types";
 
 export type SyncState = "local" | "synced" | "pending" | "offline" | "error";
+
+type SupplierClient = SupabaseClient;
 
 // Outbox
 // Sales the server has not acknowledged yet, and the only shop data written to disk. Held
@@ -172,7 +174,13 @@ export const toRemoteProduct = (p: Product) => ({
 // small whole-of-shop lists are pulled in one go.
 export async function pullProducts(client: SupabaseClient, isAdmin: boolean): Promise<Product[]> {
   const table = isAdmin ? "products" : "products_public";
-  const { data, error } = await client.from(table).select("*");
+  // Ordered by the database, not the screens: every list of products reads the same way
+  // without each one re-sorting. Retired sinks last, alphabetical within each group.
+  const { data, error } = await client
+    .from(table)
+    .select("*")
+    .order("retired_at", { nullsFirst: true })
+    .order("name");
   if (error) throw error;
   return (data ?? []).map(fromRemoteProduct);
 }
@@ -264,6 +272,82 @@ export async function flushOutbox(client: SupabaseClient) {
 
 export async function pushProduct(client: SupabaseClient, product: Product) {
   const { error } = await client.from("products").upsert(toRemoteProduct(product), { onConflict: "id" });
+  if (error) throw error;
+}
+
+// Suppliers
+// Admin-only throughout: the tables carry no public view, so a staff session reading these
+// gets nothing back rather than a filtered row.
+type RemoteSupplier = {
+  id: string; name: string; contact_person: string; phones?: string[] | null;
+  location: string; map_coords?: string; delivery: string; note: string; retired_at?: string | null;
+};
+
+const fromRemoteSupplier = (r: RemoteSupplier): Supplier => ({
+  id: r.id,
+  name: r.name,
+  contactPerson: r.contact_person ?? "",
+  phones: (r.phones ?? []).filter(Boolean),
+  location: r.location ?? "",
+  mapCoords: r.map_coords ?? "",
+  delivery: (r.delivery ?? "collect") as Supplier["delivery"],
+  note: r.note ?? "",
+  retiredAt: r.retired_at ?? null
+});
+
+const toRemoteSupplier = (s: Supplier) => ({
+  id: s.id,
+  name: s.name,
+  contact_person: s.contactPerson,
+  phones: s.phones.map(n => n.trim()).filter(Boolean),
+  location: s.location,
+  map_coords: s.mapCoords,
+  delivery: s.delivery,
+  note: s.note,
+  retired_at: s.retiredAt ?? null,
+  updated_at: new Date().toISOString()
+});
+
+export async function pullSuppliers(client: SupplierClient): Promise<Supplier[]> {
+  const { data, error } = await client.from("suppliers").select("*").order("name");
+  if (error) throw error;
+  return (data ?? []).map(fromRemoteSupplier);
+}
+
+export async function pushSupplier(client: SupplierClient, supplier: Supplier) {
+  const { error } = await client.from("suppliers").upsert(toRemoteSupplier(supplier), { onConflict: "id" });
+  if (error) throw error;
+}
+
+export async function removeSupplier(client: SupplierClient, id: string) {
+  const { error } = await client.from("suppliers").delete().eq("id", id);
+  if (error) throw error;
+}
+
+type RemoteLink = { product_id: string; supplier_id: string; unit_cost: number | null; note: string };
+
+export async function pullProductSuppliers(client: SupplierClient): Promise<ProductSupplier[]> {
+  const { data, error } = await client.from("product_suppliers").select("*");
+  if (error) throw error;
+  return ((data ?? []) as RemoteLink[]).map(r => ({
+    productId: r.product_id,
+    supplierId: r.supplier_id,
+    unitCost: r.unit_cost === null ? null : Number(r.unit_cost),
+    note: r.note ?? ""
+  }));
+}
+
+export async function linkSupplier(client: SupplierClient, link: ProductSupplier) {
+  const { error } = await client.from("product_suppliers").upsert(
+    { product_id: link.productId, supplier_id: link.supplierId, unit_cost: link.unitCost, note: link.note },
+    { onConflict: "product_id,supplier_id" }
+  );
+  if (error) throw error;
+}
+
+export async function unlinkSupplier(client: SupplierClient, productId: string, supplierId: string) {
+  const { error } = await client.from("product_suppliers").delete()
+    .eq("product_id", productId).eq("supplier_id", supplierId);
   if (error) throw error;
 }
 

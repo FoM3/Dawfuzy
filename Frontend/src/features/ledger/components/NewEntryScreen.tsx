@@ -53,12 +53,21 @@ export function NewEntryScreen(form: EntryForm) {
       // Retired products stay in the catalogue and on past sales, but cannot be sold again.
       .filter(p => !p.retiredAt)
       .filter(p => packFilter === "All" || p.pack === packFilter)
-      .filter(p => !term || p.name.toLowerCase().includes(term) || p.description.toLowerCase().includes(term))
-      .sort((a, b) => {
-        const sold = (form.popularity[b.id] ?? 0) - (form.popularity[a.id] ?? 0);
-        return sold !== 0 ? sold : a.name.localeCompare(b.name);
-      });
-  }, [form.products, form.popularity, query, packFilter]);
+      // No sort: the catalogue arrives alphabetical, so the same water is always in the same
+      // place. Ordering by what sold most moved the tiles about as the day went on.
+      .filter(p => !term || p.name.toLowerCase().includes(term) || p.description.toLowerCase().includes(term));
+  }, [form.products, query, packFilter]);
+
+  // The best seller still gets its badge, found by sales rather than by being first in the
+  // list, which alphabetical order would otherwise make meaningless.
+  const topSellerId = useMemo(() => {
+    let best = "";
+    let most = 0;
+    for (const [id, units] of Object.entries(form.popularity)) {
+      if (units > most) { best = id; most = units; }
+    }
+    return most > 0 ? best : "";
+  }, [form.popularity]);
 
   const showFinder = form.products.length > 6;
   const scrolls = visible.length > SCROLL_AFTER;
@@ -143,9 +152,9 @@ export function NewEntryScreen(form: EntryForm) {
                 scrolls && "max-h-105 overflow-y-auto overscroll-contain pr-1"
               )}
             >
-              {visible.map((product, index) => {
+              {visible.map(product => {
                 const isPicked = product.id === form.productId;
-                const isTopSeller = showFinder && index === 0 && (form.popularity[product.id] ?? 0) > 0 && !query;
+                const isTopSeller = showFinder && product.id === topSellerId;
                 return (
                   <button
                     type="button"

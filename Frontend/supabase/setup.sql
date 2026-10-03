@@ -291,6 +291,82 @@ create policy sales_insert on public.sales for insert to authenticated
   with check (recorded_by = auth.uid());
 
 
+-- ------------------------------------------------------------- suppliers ----
+-- Where the stock comes from. Admin-only, and deliberately absent from products_public:
+-- the rule that keeps cost off a staff device is that the column is not in the view they
+-- read, not that the screen declines to render it. Supplier names, prices and phone
+-- numbers get the same treatment.
+create table if not exists public.suppliers (
+  id uuid primary key default gen_random_uuid(),
+  -- The company, or the person if they trade under their own name.
+  name text not null,
+  -- Who you actually speak to there, which is often not the company name.
+  contact_person text not null default '',
+  -- A list, because a trader often has two or three numbers and no fixed idea of which
+  -- is the main one. Empty is normal.
+  phones text[] not null default '{}',
+  location text not null default '',
+  -- "lat,lng" as the app normalises it, so the stored value is always a usable map link.
+  -- Empty when nobody has pinned the place.
+  map_coords text not null default '',
+  -- Who moves the goods: they bring it, or we go for it.
+  delivery text not null default 'collect' check (delivery in ('deliver', 'collect')),
+  note text not null default '',
+  -- Set instead of deleting, so a supplier you stop using keeps its place on past links.
+  retired_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- Which supplier sells which product. Many to many on purpose: one supplier sells several
+-- products, and the same product can come from more than one source. The link is per
+-- product, never per brand, because two products of one brand can have different suppliers.
+create table if not exists public.product_suppliers (
+  product_id  uuid not null references public.products(id)  on delete cascade,
+  supplier_id uuid not null references public.suppliers(id) on delete cascade,
+  -- What this source charges for one unit. Null until somebody knows it.
+  unit_cost numeric(10,2),
+  note text not null default '',
+  created_at timestamptz not null default now(),
+  primary key (product_id, supplier_id)
+);
+
+create index if not exists product_suppliers_supplier_idx on public.product_suppliers (supplier_id);
+
+-- Added after the table shipped, so an install made before this still picks them up.
+alter table public.suppliers add column if not exists map_coords text not null default '';
+alter table public.suppliers add column if not exists phones text[] not null default '{}';
+
+-- The single phone and its alternate became one list. Folded in before the old columns go,
+-- so an install made against the earlier shape keeps its numbers.
+do $phones$
+begin
+  if exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public' and table_name = 'suppliers' and column_name = 'phone'
+  ) then
+    update public.suppliers
+       set phones = array_remove(array[nullif(trim(phone), ''), nullif(trim(alt_phone), '')], null)
+     where cardinality(phones) = 0;
+    alter table public.suppliers drop column phone;
+    alter table public.suppliers drop column alt_phone;
+  end if;
+end $phones$;
+
+alter table public.suppliers         enable row level security;
+alter table public.product_suppliers enable row level security;
+
+drop policy if exists suppliers_admin_all on public.suppliers;
+create policy suppliers_admin_all on public.suppliers for all to authenticated
+  using (public.is_admin()) with check (public.is_admin());
+
+drop policy if exists product_suppliers_admin_all on public.product_suppliers;
+create policy product_suppliers_admin_all on public.product_suppliers for all to authenticated
+  using (public.is_admin()) with check (public.is_admin());
+
+revoke all on public.suppliers         from anon;
+revoke all on public.product_suppliers from anon;
+
 -- --------------------------------------------------------------- audit log ----
 -- Append-only trail of admin actions. actor_name is copied in rather than joined,
 -- so removing a person never erases what they did.

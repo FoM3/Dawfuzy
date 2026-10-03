@@ -188,7 +188,7 @@ export function ExportSheet({ open, setOpen, kind, isAdmin, accountName, product
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <SheetContent side="right" className="w-full gap-0 bg-app sm:max-w-115">
+      <SheetContent side="right" className="w-full gap-0 bg-app data-[side=right]:w-full data-[side=right]:sm:max-w-192">
         <SheetHeader className="border-b border-line">
           <SheetTitle className="font-serif text-2xl2 font-medium">
             Export {kind === "sales" ? "sales" : "summary"}

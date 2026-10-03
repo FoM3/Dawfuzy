@@ -10,6 +10,7 @@ const titles: Record<LedgerScreen, string> = {
   entry: "New sale",
   history: "Sales history",
   products: "Products",
+  suppliers: "Suppliers",
   team: "Team",
   audit: "Audit log",
   account: "Account"

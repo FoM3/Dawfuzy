@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Archive, Package, PencilLine, RotateCcw, Trash2, UserCheck, UserMinus, UserPen, UserPlus, UserX } from "lucide-react";
+import { Truck, Archive, Package, PencilLine, RotateCcw, Trash2, UserCheck, UserMinus, UserPen, UserPlus, UserX } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Pagination } from "@/components/pagination";
 import { PAGE_SIZE, useAuditPage } from "@/features/ledger/data/queries";
@@ -22,6 +22,11 @@ const look: Record<AuditAction, { label: string; Icon: typeof Package; tone: str
   "product.updated": { label: "Edited product", Icon: PencilLine, tone: "bg-info-soft text-info" },
   "product.retired": { label: "Retired product", Icon: Archive, tone: "bg-neg-soft text-neg" },
   "product.restored": { label: "Brought product back", Icon: RotateCcw, tone: "bg-pos-soft text-pos" },
+  "supplier.added": { label: "Added supplier", Icon: Truck, tone: "bg-info-soft text-info" },
+  "supplier.updated": { label: "Edited supplier", Icon: Truck, tone: "bg-info-soft text-info" },
+  "supplier.removed": { label: "Removed supplier", Icon: Truck, tone: "bg-neg-soft text-neg" },
+  "supplier.linked": { label: "Linked supplier", Icon: Truck, tone: "bg-info-soft text-info" },
+  "supplier.unlinked": { label: "Unlinked supplier", Icon: Truck, tone: "bg-warn-soft text-accent" },
   "person.added": { label: "Added person", Icon: UserPlus, tone: "bg-pos-soft text-pos" },
   "person.updated": { label: "Edited person", Icon: UserPen, tone: "bg-info-soft text-info" },
   "person.removed": { label: "Removed person", Icon: UserMinus, tone: "bg-neg-soft text-neg" },

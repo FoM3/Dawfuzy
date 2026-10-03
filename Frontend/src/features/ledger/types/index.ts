@@ -16,6 +16,38 @@ export type Product = {
   reorderAt: number;
 };
 
+// Who moves the goods: they bring it, or we go for it.
+export type DeliveryMode = "deliver" | "collect";
+
+// Where stock is bought. Admin-only, and never sent to a staff device.
+export type Supplier = {
+  id: string;
+  name: string;
+  // Who you actually speak to there, which is often not the company name.
+  contactPerson: string;
+  // Every number for them, in the order they were entered. Often empty, sometimes three.
+  phones: string[];
+  location: string;
+  // "lat,lng", or empty. Stored normalised so it can always be turned into a map link.
+  mapCoords: string;
+  delivery: DeliveryMode;
+  note: string;
+  // Set when you stop buying from them; the link on past products is kept.
+  retiredAt?: string | null;
+};
+
+// One product bought from one supplier. A product can have several, because two products
+// of the same brand are not always bought from the same place.
+export type ProductSupplier = {
+  productId: string;
+  supplierId: string;
+  // What this source charges for one unit, or null while nobody knows it.
+  unitCost: number | null;
+  note: string;
+};
+
+export type SupplierDraft = Omit<Supplier, "id" | "retiredAt">;
+
 export type TransactionKind = "sale" | "restock";
 
 export type Transaction = {
@@ -38,7 +70,7 @@ export type Transaction = {
   recordedBy?: string;
 };
 
-export type LedgerScreen = "overview" | "entry" | "history" | "products" | "team" | "audit" | "account";
+export type LedgerScreen = "overview" | "entry" | "history" | "products" | "suppliers" | "team" | "audit" | "account";
 
 export type Role = "superadmin" | "admin" | "user";
 
@@ -67,6 +99,11 @@ export type AuditAction =
   | "product.updated"
   | "product.retired"
   | "product.restored"
+  | "supplier.added"
+  | "supplier.updated"
+  | "supplier.removed"
+  | "supplier.linked"
+  | "supplier.unlinked"
   | "person.added"
   | "person.updated"
   | "person.removed"
