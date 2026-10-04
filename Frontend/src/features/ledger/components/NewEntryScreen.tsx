@@ -47,19 +47,7 @@ export function NewEntryScreen(form: EntryForm) {
     setPackFilter(next);
   }
 
-  const visible = useMemo(() => {
-    const term = query.trim().toLowerCase();
-    return form.products
-      // Retired products stay in the catalogue and on past sales, but cannot be sold again.
-      .filter(p => !p.retiredAt)
-      .filter(p => packFilter === "All" || p.pack === packFilter)
-      // No sort: the catalogue arrives alphabetical, so the same water is always in the same
-      // place. Ordering by what sold most moved the tiles about as the day went on.
-      .filter(p => !term || p.name.toLowerCase().includes(term) || p.description.toLowerCase().includes(term));
-  }, [form.products, query, packFilter]);
-
-  // The best seller still gets its badge, found by sales rather than by being first in the
-  // list, which alphabetical order would otherwise make meaningless.
+  // The best seller, found by units sold rather than by position.
   const topSellerId = useMemo(() => {
     let best = "";
     let most = 0;
@@ -68,6 +56,20 @@ export function NewEntryScreen(form: EntryForm) {
     }
     return most > 0 ? best : "";
   }, [form.popularity]);
+
+  const visible = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    const matches = form.products
+      // Retired products stay in the catalogue and on past sales, but cannot be sold again.
+      .filter(p => !p.retiredAt)
+      .filter(p => packFilter === "All" || p.pack === packFilter)
+      .filter(p => !term || p.name.toLowerCase().includes(term) || p.description.toLowerCase().includes(term));
+    // The best seller leads, then the catalogue's own alphabetical order. Sorting the whole
+    // grid by sales moved every tile about as the day went on; one pinned leader that rarely
+    // changes keeps the rest where the hand already expects them.
+    const lead = matches.findIndex(p => p.id === topSellerId);
+    return lead < 1 ? matches : [matches[lead], ...matches.slice(0, lead), ...matches.slice(lead + 1)];
+  }, [form.products, query, packFilter, topSellerId]);
 
   const showFinder = form.products.length > 6;
   const scrolls = visible.length > SCROLL_AFTER;
