@@ -47,15 +47,20 @@ export function NewEntryScreen(form: EntryForm) {
     setPackFilter(next);
   }
 
-  // The best seller, found by units sold rather than by position.
+  // The best seller within the chosen pack, so each filter leads with the one that moves most
+  // rather than only the shop-wide winner. The search term is deliberately not part of this:
+  // the leader would otherwise change with every keystroke.
   const topSellerId = useMemo(() => {
     let best = "";
     let most = 0;
-    for (const [id, units] of Object.entries(form.popularity)) {
-      if (units > most) { best = id; most = units; }
+    for (const product of form.products) {
+      if (product.retiredAt) continue;
+      if (packFilter !== "All" && product.pack !== packFilter) continue;
+      const units = form.popularity[product.id] ?? 0;
+      if (units > most) { best = product.id; most = units; }
     }
     return most > 0 ? best : "";
-  }, [form.popularity]);
+  }, [form.products, form.popularity, packFilter]);
 
   const visible = useMemo(() => {
     const term = query.trim().toLowerCase();
